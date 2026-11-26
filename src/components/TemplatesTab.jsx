@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Plus,
   Save,
@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ExternalLink,
   RotateCcw,
+  Search,
 } from 'lucide-react';
 import { api } from '../api';
 import EmailPreviewPane from './EmailPreviewPane';
@@ -29,11 +30,11 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
       : value || '';
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+    <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-slate-800">{label}</span>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
-          <Upload className="h-3.5 w-3.5" />
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-xs transition hover:bg-slate-50">
+          <Upload className="h-3.5 w-3.5 text-amber-600" />
           {uploading ? 'Uploading...' : 'Upload Image'}
           <input
             type="file"
@@ -53,7 +54,7 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
             placeholder="Paste image link (https://...) or upload above"
             value={isDataUrl ? '' : value || ''}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full rounded-md border border-slate-300 bg-white py-1.5 pr-3 pl-8 text-xs text-slate-800 focus:border-amber-500 focus:outline-none"
+            className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pr-3 pl-8 text-xs text-slate-800 focus:border-amber-500 focus:outline-none"
           />
         </div>
         {!isDataUrl && fullDisplayUrl && (
@@ -62,7 +63,7 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
             target="_blank"
             rel="noreferrer"
             title="Open saved image link"
-            className="rounded-md border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100"
+            className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100"
           >
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
@@ -74,12 +75,12 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
           <img
             src={value}
             alt={label}
-            className={`${previewHeight} max-w-[180px] rounded border border-slate-200 bg-white object-contain p-1`}
+            className={`${previewHeight} max-w-[180px] rounded-lg border border-slate-200 bg-white object-contain p-1`}
           />
           <div className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
             {isDataUrl ? (
               <span className="font-medium text-emerald-700">
-                Uploaded image saved in browser (will be embedded inline in emails)
+                Uploaded image saved (embedded inline in emails)
               </span>
             ) : (
               <>
@@ -109,6 +110,7 @@ export default function TemplatesTab({
   const [dirty, setDirty] = useState(false);
   const [uploadingField, setUploadingField] = useState('');
   const [previewName, setPreviewName] = useState('Deeksha');
+  const [brandSearch, setBrandSearch] = useState('');
   const [newDeptName, setNewDeptName] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
 
@@ -116,6 +118,12 @@ export default function TemplatesTab({
     setDraft(activeTemplate);
     setDirty(false);
   }, [activeTemplate?.id, activeTemplate?.updatedAt]);
+
+  const filteredTemplates = useMemo(() => {
+    const q = brandSearch.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter((t) => (t.department || '').toLowerCase().includes(q));
+  }, [templates, brandSearch]);
 
   const updateField = (field, value) => {
     setDraft((prev) => ({ ...prev, [field]: value }));
@@ -142,14 +150,14 @@ export default function TemplatesTab({
   const handleSave = async () => {
     if (!draft) return;
     if (!draft.department?.trim()) {
-      notify('Department name cannot be empty.', 'error');
+      notify('Brand / Department name cannot be empty.', 'error');
       return;
     }
     setSaving(true);
     try {
       await onUpdate(draft.id, draft);
       setDirty(false);
-      notify(`Saved template for "${draft.department}"`, 'success');
+      notify(`Saved "${draft.department}" template`, 'success');
     } catch (err) {
       notify(err.message, 'error');
     } finally {
@@ -184,15 +192,18 @@ export default function TemplatesTab({
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-      {/* Left: Simple Template List */}
+      {/* Left: Organization Brand Templates List */}
       <div className="lg:col-span-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">Department Templates</h2>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Organization Brands</h2>
+              <p className="text-[11px] text-slate-500">{templates.length} templates ready</p>
+            </div>
             <button
               type="button"
               onClick={() => setShowNewForm((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-amber-700"
             >
               <Plus className="h-3.5 w-3.5" />
               New
@@ -202,14 +213,14 @@ export default function TemplatesTab({
           {showNewForm && (
             <form
               onSubmit={handleCreateDept}
-              className="mb-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5"
+              className="mb-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5"
             >
               <input
                 type="text"
-                placeholder="Department name (e.g. HR, Legal)"
+                placeholder="Brand or department name"
                 value={newDeptName}
                 onChange={(e) => setNewDeptName(e.target.value)}
-                className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-amber-500 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-amber-500 focus:outline-none"
                 autoFocus
               />
               <div className="flex justify-end gap-1.5">
@@ -222,7 +233,7 @@ export default function TemplatesTab({
                 </button>
                 <button
                   type="submit"
-                  className="rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white"
+                  className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white"
                 >
                   Create
                 </button>
@@ -230,24 +241,41 @@ export default function TemplatesTab({
             </form>
           )}
 
-          <div className="space-y-1.5">
-            {templates.map((tpl) => {
+          <div className="relative mb-2.5">
+            <Search className="absolute top-2 left-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search brands..."
+              value={brandSearch}
+              onChange={(e) => setBrandSearch(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pr-3 pl-8 text-xs focus:border-amber-500 focus:bg-white focus:outline-none"
+            />
+          </div>
+
+          <div className="max-h-[540px] space-y-1.5 overflow-y-auto pr-1">
+            {filteredTemplates.map((tpl) => {
               const selected = tpl.id === draft?.id;
               return (
                 <button
                   key={tpl.id}
                   type="button"
                   onClick={() => onSelectId(tpl.id)}
-                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                  className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-xs transition ${
                     selected
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-slate-50 text-slate-800 hover:bg-slate-100'
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                      : 'border-slate-100 bg-slate-50/70 text-slate-800 hover:border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <span className="truncate font-medium">{tpl.department}</span>
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: tpl.brandColor || '#d97706' }}
+                    />
+                    <span className="truncate font-semibold">{tpl.department}</span>
+                  </div>
                   {tpl.isDefault && (
                     <span
-                      className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         selected ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'
                       }`}
                     >
@@ -262,22 +290,25 @@ export default function TemplatesTab({
           <button
             type="button"
             onClick={onResetDefaults}
-            className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+            className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="h-3 w-3" />
-            Reset 3 Dummy Templates
+            Reset All 13 Brand Templates
           </button>
         </div>
       </div>
 
-      {/* Middle: Clean Editor */}
+      {/* Middle: Polished Editor */}
       <div className="lg:col-span-5">
         {draft && (
-          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h2 className="text-base font-semibold text-slate-900">
-                Edit "{draft.department}"
-              </h2>
+          <div className="space-y-4 rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3.5">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">{draft.department}</h2>
+                <p className="text-[11px] text-slate-500">
+                  Logo on top &rarr; Dear {'{{name}}'}, + Message &rarr; Thanksgiving Poster
+                </p>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -292,8 +323,10 @@ export default function TemplatesTab({
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white transition ${
-                    dirty ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-900 hover:bg-slate-800'
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white shadow-xs transition ${
+                    dirty
+                      ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700'
+                      : 'bg-slate-900 hover:bg-slate-800'
                   }`}
                 >
                   {dirty ? <Save className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -304,8 +337,8 @@ export default function TemplatesTab({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">
-                  Department Name
+                <label className="mb-1 block text-xs font-semibold text-slate-700">
+                  Brand / Department Name
                 </label>
                 <input
                   type="text"
@@ -328,7 +361,7 @@ export default function TemplatesTab({
             </div>
 
             <ImageField
-              label="1. Top Company Logo (Upload or Image Link)"
+              label="1. Top Brand Logo (Upload or Image Link)"
               value={draft.logoUrl}
               onChange={(val) => updateField('logoUrl', val)}
               onUpload={(e) => handleImageUpload('logoUrl', e)}
@@ -337,7 +370,7 @@ export default function TemplatesTab({
             />
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1 block text-xs font-semibold text-slate-700">
                 Email Subject
               </label>
               <input
@@ -350,7 +383,7 @@ export default function TemplatesTab({
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1 block text-xs font-semibold text-slate-700">
                 2. Greeting (use {'{{name}}'} for client name)
               </label>
               <input
@@ -362,7 +395,7 @@ export default function TemplatesTab({
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1 block text-xs font-semibold text-slate-700">
                 Email Description / Message
               </label>
               <textarea
@@ -385,15 +418,15 @@ export default function TemplatesTab({
         )}
       </div>
 
-      {/* Right: Simple Preview */}
+      {/* Right: Live Inbox Preview */}
       <div className="lg:col-span-4">
-        <div className="mb-2.5 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3.5 py-2 shadow-sm">
-          <span className="text-xs font-medium text-slate-600">Preview Client Name:</span>
+        <div className="mb-3 flex items-center justify-between rounded-2xl border border-slate-200/90 bg-white px-4 py-2.5 shadow-sm">
+          <span className="text-xs font-semibold text-slate-700">Preview Client Name:</span>
           <input
             type="text"
             value={previewName}
             onChange={(e) => setPreviewName(e.target.value)}
-            className="w-40 rounded-md border border-slate-300 px-2.5 py-1 text-xs focus:border-amber-500 focus:outline-none"
+            className="w-40 rounded-lg border border-slate-300 px-2.5 py-1 text-xs focus:border-amber-500 focus:outline-none"
           />
         </div>
         <EmailPreviewPane
@@ -401,8 +434,11 @@ export default function TemplatesTab({
           client={{
             name: previewName || 'Deeksha',
             email: 'client@example.com',
-            department: draft?.department || 'General',
+            department: draft?.department || 'Head Field',
           }}
+          fromName={draft?.department || 'Head Field'}
+          fromEmail="greetings@headfield.com"
+          title={`Preview: ${draft?.department || 'Template'}`}
         />
       </div>
     </div>

@@ -41,6 +41,8 @@ export const api = {
     };
   },
 
+  getMailStatus: () => request('/api/mail-status'),
+
   sendSingleEmail: (payload) =>
     request('/api/send-email', { method: 'POST', body: JSON.stringify(payload) }),
 

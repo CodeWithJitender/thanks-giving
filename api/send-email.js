@@ -171,28 +171,58 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing client email or template' });
   }
 
+  const hasResend = Boolean(process.env.RESEND_API_KEY);
   const cfg = {
-    mode: smtpConfig.mode || (process.env.SMTP_USER ? 'smtp' : 'simulation'),
     host: smtpConfig.host || process.env.SMTP_HOST || 'smtp.gmail.com',
     port: Number(smtpConfig.port || process.env.SMTP_PORT) || 587,
     secure: Boolean(smtpConfig.secure ?? process.env.SMTP_SECURE === 'true'),
     user: smtpConfig.user || process.env.SMTP_USER || '',
     pass: smtpConfig.pass || process.env.SMTP_PASS || '',
     fromName: smtpConfig.fromName || process.env.SMTP_FROM_NAME || 'Head Field',
-    fromEmail: smtpConfig.fromEmail || process.env.SMTP_FROM_EMAIL || smtpConfig.user || process.env.SMTP_USER || '',
+    fromEmail:
+      smtpConfig.fromEmail ||
+      process.env.SMTP_FROM_EMAIL ||
+      smtpConfig.user ||
+      process.env.SMTP_USER ||
+      '',
     replyTo: smtpConfig.replyTo || process.env.SMTP_REPLY_TO || '',
   };
 
-  if (cfg.mode === 'simulation') {
-    return res.status(200).json({
-      ok: true,
-      simulated: true,
-      message: `Simulated email to ${client.email} using "${template.department}" template.`,
+  if (!hasResend && (!cfg.host || !cfg.user || !cfg.pass)) {
+    return res.status(400).json({
+      ok: false,
+      error:
+        'Email server is not configured. Add SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS (or RESEND_API_KEY) to .env locally or Vercel Environment Variables.',
     });
   }
 
-  if (!cfg.host || !cfg.user || !cfg.pass) {
-    return res.status(400).json({ error: 'SMTP host, username, and password are required for Live SMTP.' });
+  const { subject, html, text, attachments } = buildEmail({ template, client });
+  const fromEmail = cfg.fromEmail || cfg.user;
+
+  if (hasResend && !cfg.user) {
+    try {
+      const resendRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: `${String(cfg.fromName).replace(/[<>]/g, '')} <${fromEmail}>`,
+          to: [client.email],
+          subject: isTest ? `[TEST] ${subject}` : subject,
+          html,
+          text,
+        }),
+      });
+      const data = await resendRes.json().catch(() => ({}));
+      if (!resendRes.ok) {
+        return res.status(400).json({ ok: false, error: data.message || 'Resend API failed' });
+      }
+      return res.status(200).json({ ok: true, messageId: data.id, message: `Sent to ${client.email}` });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err?.message || 'Resend send failed' });
+    }
   }
 
   try {
@@ -202,9 +232,6 @@ export default async function handler(req, res) {
       secure: cfg.secure,
       auth: { user: cfg.user, pass: cfg.pass },
     });
-
-    const { subject, html, text, attachments } = buildEmail({ template, client });
-    const fromEmail = cfg.fromEmail || cfg.user;
 
     const info = await transporter.sendMail({
       from: `"${String(cfg.fromName).replace(/"/g, '')}" <${fromEmail}>`,

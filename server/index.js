@@ -27,6 +27,7 @@ import {
 import sendEmailHandler from '../api/send-email.js';
 import testSmtpHandler from '../api/test-smtp.js';
 import etherealHandler from '../api/ethereal.js';
+import mailStatusHandler from '../api/mail-status.js';
 
 dotenv.config();
 
@@ -369,6 +370,7 @@ app.post('/api/campaigns/:id/retry', async (req, res) => {
   res.status(202).json({ campaign: job });
 });
 
+app.get('/api/mail-status', mailStatusHandler);
 app.post('/api/send-email', sendEmailHandler);
 app.post('/api/test-smtp', testSmtpHandler);
 app.post('/api/ethereal', etherealHandler);

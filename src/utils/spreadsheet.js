@@ -24,7 +24,7 @@ export function detectColumns(headers = []) {
   return {
     nameCol: findMatch(['client name', 'full name', 'name', 'first name', 'contact name', 'client']),
     emailCol: findMatch(['email id', 'email address', 'e-mail', 'email', 'mail']),
-    deptCol: findMatch(['department', 'dept', 'lob', 'line of business', 'division', 'team']),
+    deptCol: findMatch(['department', 'dept', 'website name', 'lob', 'brand', 'line of business', 'division', 'team']),
   };
 }
 
@@ -80,15 +80,15 @@ export function normalizeRows(rawRows, mapping) {
 
 export function getSampleSpreadsheetRows() {
   return [
-    { Name: 'Deeksha Sharma', 'Email ID': 'deeksha.sharma@example.com', Department: 'Sales' },
-    { Name: 'Aarav Mehta', 'Email ID': 'aarav.mehta@example.com', Department: 'Sales' },
-    { Name: 'Priya Nair', 'Email ID': 'priya.nair@example.com', Department: 'Operations' },
-    { Name: 'Michael Carter', 'Email ID': 'm.carter@example.com', Department: 'General' },
-    { Name: 'Sophia Chen', 'Email ID': 'sophia.chen@example.com', Department: 'Sales' },
-    { Name: 'Rohan Kapoor', 'Email ID': 'rohan.kapoor@example.com', Department: 'Operations' },
-    { Name: 'Elena Rodriguez', 'Email ID': 'elena.rodriguez@example.com', Department: 'Legal' },
-    { Name: 'David Kim', 'Email ID': 'david.kim@example.com', Department: 'General' },
-    { Name: 'Invalid Client', 'Email ID': 'not-an-email', Department: 'Sales' },
+    { Name: 'Deeksha Sharma', 'Email ID': 'deeksha.sharma@example.com', Department: 'Head Field' },
+    { Name: 'Aarav Mehta', 'Email ID': 'aarav.mehta@example.com', Department: 'Head Field' },
+    { Name: 'Priya Nair', 'Email ID': 'priya.nair@example.com', Department: 'Glocal BPO' },
+    { Name: 'Michael Carter', 'Email ID': 'm.carter@example.com', Department: 'Glocal Design' },
+    { Name: 'Sophia Chen', 'Email ID': 'sophia.chen@example.com', Department: 'Glocal Codes' },
+    { Name: 'Rohan Kapoor', 'Email ID': 'rohan.kapoor@example.com', Department: 'Glocal Accounting' },
+    { Name: 'Elena Rodriguez', 'Email ID': 'elena.rodriguez@example.com', Department: 'HF Realtors' },
+    { Name: 'David Kim', 'Email ID': 'david.kim@example.com', Department: 'Glocal Assist' },
+    { Name: 'Invalid Client', 'Email ID': 'not-an-email', Department: 'Head Field' },
   ];
 }
 
@@ -108,7 +108,6 @@ export function exportCampaignCsv(campaign) {
     TemplateUsed: r.templateUsed || '',
     Status: r.status,
     Error: r.error || '',
-    SentAt: r.sentAt || '',
     PreviewURL: r.previewUrl || '',
   }));
   const ws = XLSX.utils.json_to_sheet(rows);

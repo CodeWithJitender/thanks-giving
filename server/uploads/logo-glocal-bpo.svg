@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="82" viewBox="0 0 380 82">
+  <rect width="380" height="82" fill="#ffffff"/>
+  <text x="190" y="39" text-anchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="29" font-weight="700" letter-spacing="3" fill="#134e4a">GLOCAL BPO</text>
+  <line x1="34" y1="56" x2="108" y2="56" stroke="#ea580c" stroke-width="3"/>
+  <text x="190" y="60" text-anchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="700" letter-spacing="1.8" fill="#475569">BUSINESS OPERATIONS</text>
+  <line x1="272" y1="56" x2="346" y2="56" stroke="#ea580c" stroke-width="3"/>
+</svg>

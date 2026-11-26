@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   LayoutTemplate,
   FileSpreadsheet,
-  Settings,
   Send,
   CheckCircle2,
   AlertCircle,
@@ -10,19 +9,15 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_TEMPLATES,
-  loadStoredSmtp,
   loadStoredTemplates,
-  saveStoredSmtp,
   saveStoredTemplates,
 } from './utils/defaultTemplates';
 import TemplatesTab from './components/TemplatesTab';
 import SpreadsheetTab from './components/SpreadsheetTab';
-import SmtpSettingsTab from './components/SmtpSettingsTab';
 
 const TABS = [
-  { id: 'templates', label: '1. Templates', icon: LayoutTemplate },
-  { id: 'spreadsheet', label: '2. Upload Sheet & Send', icon: FileSpreadsheet },
-  { id: 'smtp', label: '3. SMTP Settings', icon: Settings },
+  { id: 'templates', label: '1. Brand Templates', icon: LayoutTemplate },
+  { id: 'spreadsheet', label: '2. Client Sheet & Send', icon: FileSpreadsheet },
 ];
 
 export default function App() {
@@ -31,7 +26,6 @@ export default function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     () => loadStoredTemplates()[0]?.id || null
   );
-  const [smtpConfig, setSmtpConfig] = useState(() => loadStoredSmtp());
   const [activeCampaign, setActiveCampaign] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -50,24 +44,25 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4200);
+    const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
 
   const handleCreateTemplate = async (payload) => {
-    const dept = (payload.department || 'New Department').trim();
+    const dept = (payload.department || 'New Brand').trim();
     const base = templates[0] || DEFAULT_TEMPLATES[0];
     const newTemplate = {
-      id: `dept-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       department: dept,
+      brandColor: payload.brandColor || '#d97706',
       isDefault: Boolean(payload.isDefault),
-      subject: payload.subject || `Happy Thanksgiving, {{name}} — From ${dept}`,
+      subject: payload.subject || `Happy Thanksgiving, {{name}} — From ${dept}!`,
       greeting: payload.greeting || 'Dear {{name}},',
       body:
         payload.body ||
-        `As Thanksgiving approaches, we want to take a moment to express our sincere gratitude for the trust you place in our ${dept} team.\n\nWe wish you and your loved ones a happy Thanksgiving filled with warmth, joy, and time spent with family and friends.`,
+        `As Thanksgiving approaches, we want to take a moment to express our sincere gratitude for the trust you place in ${dept}.\n\nWe wish you and your loved ones a happy Thanksgiving filled with warmth, joy, and time spent with family and friends.`,
       logoUrl: payload.logoUrl || base.logoUrl,
-      logoWidth: Number(payload.logoWidth) || 210,
+      logoWidth: Number(payload.logoWidth) || 220,
       posterUrl: payload.posterUrl || base.posterUrl,
       updatedAt: new Date().toISOString(),
     };
@@ -114,57 +109,28 @@ export default function App() {
     saveStoredTemplates(DEFAULT_TEMPLATES);
     setTemplates(DEFAULT_TEMPLATES);
     setSelectedTemplateId(DEFAULT_TEMPLATES[0].id);
-    notify('Restored the 3 default Thanksgiving templates', 'success');
-  };
-
-  const handleCreateMissingTemplate = async (departmentName) => {
-    try {
-      const created = await handleCreateTemplate({ department: departmentName });
-      setSelectedTemplateId(created.id);
-      setActiveTab('templates');
-      notify(`Created template for "${departmentName}"`, 'success');
-    } catch (err) {
-      notify(err.message, 'error');
-    }
-  };
-
-  const handleSaveSmtp = async (payload) => {
-    const saved = saveStoredSmtp(payload);
-    setSmtpConfig(saved);
-    return saved;
+    notify(`Restored all ${DEFAULT_TEMPLATES.length} organization brand templates`, 'success');
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-600 text-white">
-              <Send className="h-4 w-4" />
+    <div className="min-h-screen bg-gradient-to-b from-amber-50/40 via-slate-50 to-slate-100 text-slate-900">
+      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-3.5 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-sm">
+              <Send className="h-4.5 w-4.5" />
             </div>
-            <h1 className="text-base font-bold text-slate-900">Thanksgiving Bulk Emailer</h1>
+            <div>
+              <h1 className="text-base font-bold tracking-tight text-slate-900">
+                Thanksgiving Campaign Studio
+              </h1>
+              <p className="text-[11px] text-slate-500">
+                Organization Brand Templates &bull; Client Sheet Filter &bull; Bulk Mailer
+              </p>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('smtp')}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
-              smtpConfig?.mode === 'smtp'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                : 'border-amber-200 bg-amber-50 text-amber-800'
-            }`}
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                smtpConfig?.mode === 'smtp' ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
-            />
-            {smtpConfig?.mode === 'smtp' ? `SMTP: ${smtpConfig.host}` : 'Simulation Mode'}
-          </button>
-        </div>
-
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <nav className="-mb-px flex gap-2">
+          <nav className="inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
@@ -173,14 +139,24 @@ export default function App() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition ${
+                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition ${
                     active
-                      ? 'border-amber-600 text-amber-700'
-                      : 'border-transparent text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className={`h-4 w-4 ${active ? 'text-amber-600' : ''}`} />
                   {tab.label}
+                  {tab.id === 'templates' && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                      {templates.length}
+                    </span>
+                  )}
+                  {tab.id === 'spreadsheet' && sheetState.selectedIds.size > 0 && (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                      {sheetState.selectedIds.size}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -205,28 +181,17 @@ export default function App() {
         {activeTab === 'spreadsheet' && (
           <SpreadsheetTab
             templates={templates}
-            smtpConfig={smtpConfig}
             sheetState={sheetState}
             setSheetState={setSheetState}
             activeCampaign={activeCampaign}
             setActiveCampaign={setActiveCampaign}
-            onCreateMissingTemplate={handleCreateMissingTemplate}
-            notify={notify}
-          />
-        )}
-
-        {activeTab === 'smtp' && (
-          <SmtpSettingsTab
-            smtpConfig={smtpConfig}
-            onSaveSmtp={handleSaveSmtp}
-            templates={templates}
             notify={notify}
           />
         )}
       </main>
 
       {toast && (
-        <div className="fixed right-5 bottom-5 z-50 flex max-w-md items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-medium text-white shadow-xl">
+        <div className="fixed right-5 bottom-5 z-50 flex max-w-md items-center gap-2.5 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-xs font-medium text-white shadow-xl">
           {toast.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           {toast.type === 'error' && <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />}
           {toast.type === 'info' && <Info className="h-4 w-4 shrink-0 text-amber-400" />}

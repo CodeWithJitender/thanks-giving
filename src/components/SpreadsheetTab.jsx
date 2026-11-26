@@ -5,15 +5,15 @@ import {
   Download,
   Search,
   Send,
-  Eye,
   X,
-  PlusCircle,
   CheckCircle2,
   XCircle,
   StopCircle,
   RefreshCw,
   ExternalLink,
-  SlidersHorizontal,
+  Filter,
+  Users,
+  CheckSquare,
 } from 'lucide-react';
 import { api } from '../api';
 import {
@@ -34,81 +34,46 @@ function sleep(ms) {
 
 export default function SpreadsheetTab({
   templates,
-  smtpConfig,
   sheetState,
   setSheetState,
   activeCampaign,
   setActiveCampaign,
-  onCreateMissingTemplate,
   notify,
 }) {
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
   const [page, setPage] = useState(1);
-  const [previewData, setPreviewData] = useState(null);
   const [sending, setSending] = useState(false);
-  const [templateOfTheDayId, setTemplateOfTheDayId] = useState('auto');
   const cancelRef = useRef(false);
 
-  const [showCustomMail, setShowCustomMail] = useState(false);
-  const [subjectOverride, setSubjectOverride] = useState('');
-  const [bodyOverride, setBodyOverride] = useState('');
-  const [rowOverrides, setRowOverrides] = useState({});
+  // Send & Preview Modal state
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [modalTemplateId, setModalTemplateId] = useState('');
+  const [modalSubject, setModalSubject] = useState('');
+  const [modalBody, setModalBody] = useState('');
+  const [modalFromName, setModalFromName] = useState('Head Field');
+  const [modalFromEmail, setModalFromEmail] = useState('greetings@headfield.com');
+  const [previewClientId, setPreviewClientId] = useState('');
+  const [mailStatus, setMailStatus] = useState(null);
 
   const { fileName, headers, rawRows, mapping, rows, selectedIds } = sheetState;
-
-  const templateMap = useMemo(() => {
-    const map = new Map();
-    for (const t of templates) {
-      map.set((t.department || '').trim().toLowerCase(), t);
-    }
-    return map;
-  }, [templates]);
-
-  const defaultTemplate = useMemo(
-    () => templates.find((t) => t.isDefault) || templates[0] || null,
-    [templates]
-  );
-
-  const selectedDayTemplate = useMemo(
-    () =>
-      templateOfTheDayId === 'auto'
-        ? null
-        : templates.find((t) => t.id === templateOfTheDayId) || null,
-    [templates, templateOfTheDayId]
-  );
-
-  const resolveTemplate = (dept) => {
-    if (selectedDayTemplate) return selectedDayTemplate;
-    const key = (dept || '').trim().toLowerCase();
-    return templateMap.get(key) || defaultTemplate;
-  };
-
-  const hasExactTemplate = (dept) => {
-    const key = (dept || '').trim().toLowerCase();
-    return templateMap.has(key);
-  };
 
   const handleFileUpload = async (file) => {
     if (!file) return;
     try {
       const parsed = await parseSpreadsheetFile(file);
       const normalized = normalizeRows(parsed.rawRows, parsed.mapping);
-      const defaultSelected = new Set(
-        normalized.filter((r) => r.validEmail && !r.isDuplicate).map((r) => r.id)
-      );
       setSheetState({
         fileName: parsed.fileName,
         headers: parsed.headers,
         rawRows: parsed.rawRows,
         mapping: parsed.mapping,
         rows: normalized,
-        selectedIds: defaultSelected,
+        selectedIds: new Set(),
       });
-      setRowOverrides({});
       setPage(1);
       setDeptFilter('ALL');
-      notify(`Loaded ${normalized.length} clients from ${parsed.fileName}`, 'success');
+      notify(`Loaded ${normalized.length} rows from ${parsed.fileName}`, 'success');
     } catch (err) {
       notify(err.message, 'error');
     }
@@ -119,53 +84,44 @@ export default function SpreadsheetTab({
     const sampleHeaders = Object.keys(sampleRaw[0]);
     const sampleMapping = detectColumns(sampleHeaders);
     const normalized = normalizeRows(sampleRaw, sampleMapping);
-    const defaultSelected = new Set(
-      normalized.filter((r) => r.validEmail && !r.isDuplicate).map((r) => r.id)
-    );
     setSheetState({
       fileName: 'sample-thanksgiving-clients.csv',
       headers: sampleHeaders,
       rawRows: sampleRaw,
       mapping: sampleMapping,
       rows: normalized,
-      selectedIds: defaultSelected,
+      selectedIds: new Set(),
     });
-    setRowOverrides({});
     setPage(1);
     setDeptFilter('ALL');
-    notify('Loaded sample spreadsheet', 'info');
+    notify('Loaded sample spreadsheet. Filter by Department and select clients to send.', 'info');
   };
 
   const updateMapping = (key, value) => {
     const newMapping = { ...mapping, [key]: value };
     const normalized = normalizeRows(rawRows, newMapping);
-    const defaultSelected = new Set(
-      normalized.filter((r) => r.validEmail && !r.isDuplicate).map((r) => r.id)
-    );
     setSheetState({
       ...sheetState,
       mapping: newMapping,
       rows: normalized,
-      selectedIds: defaultSelected,
+      selectedIds: new Set(),
     });
     setPage(1);
   };
 
-  const departments = useMemo(() => {
-    const map = new Map();
+  const departmentList = useMemo(() => {
+    const counts = new Map();
     for (const r of rows) {
       const dept = r.department || 'Unspecified';
-      if (!map.has(dept)) {
-        map.set(dept, {
-          department: dept,
-          count: 0,
-          exact: hasExactTemplate(dept),
-        });
-      }
-      map.get(dept).count++;
+      counts.set(dept, (counts.get(dept) || 0) + 1);
     }
-    return Array.from(map.values());
-  }, [rows, templateMap]);
+    return Array.from(counts.entries()).map(([department, count]) => ({
+      department,
+      count,
+    }));
+  }, [rows]);
+
+  const validTotalCount = useMemo(() => rows.filter((r) => r.validEmail).length, [rows]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -185,6 +141,14 @@ export default function SpreadsheetTab({
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pagedRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const filteredValidIds = useMemo(
+    () => filteredRows.filter((r) => r.validEmail).map((r) => r.id),
+    [filteredRows]
+  );
+
+  const allFilteredSelected =
+    filteredValidIds.length > 0 && filteredValidIds.every((id) => selectedIds.has(id));
+
   const toggleRow = (id) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -192,12 +156,12 @@ export default function SpreadsheetTab({
     setSheetState({ ...sheetState, selectedIds: next });
   };
 
-  const selectAllFiltered = (select) => {
+  const toggleSelectAllFiltered = () => {
     const next = new Set(selectedIds);
-    for (const r of filteredRows) {
-      if (!r.validEmail) continue;
-      if (select) next.add(r.id);
-      else next.delete(r.id);
+    if (allFilteredSelected) {
+      for (const id of filteredValidIds) next.delete(id);
+    } else {
+      for (const id of filteredValidIds) next.add(id);
     }
     setSheetState({ ...sheetState, selectedIds: next });
   };
@@ -207,34 +171,97 @@ export default function SpreadsheetTab({
     [rows, selectedIds]
   );
 
-  const runBatchSend = async (recipientsToSend, label) => {
+  const openSendModal = async () => {
+    if (selectedRecipients.length === 0) {
+      notify('Please select at least one client first.', 'error');
+      return;
+    }
+
+    const targetDept =
+      (deptFilter !== 'ALL' ? deptFilter : selectedRecipients[0]?.department || '')
+        .trim()
+        .toLowerCase();
+    const matched =
+      templates.find((t) => (t.department || '').trim().toLowerCase() === targetDept) ||
+      templates.find((t) => t.isDefault) ||
+      templates[0];
+
+    setModalTemplateId(matched?.id || '');
+    setModalSubject(matched?.subject || '');
+    setModalBody(matched?.body || '');
+    setModalFromName(matched?.department || 'Head Field');
+    setModalFromEmail('greetings@headfield.com');
+    setPreviewClientId(selectedRecipients[0]?.id || '');
+    setSendModalOpen(true);
+
+    try {
+      const status = await api.getMailStatus();
+      setMailStatus(status);
+      if (status?.defaultFromEmail) {
+        setModalFromEmail(status.defaultFromEmail);
+      }
+    } catch {
+      setMailStatus({ configured: false });
+    }
+  };
+
+  const handleModalTemplateChange = (newTplId) => {
+    setModalTemplateId(newTplId);
+    const tpl = templates.find((t) => t.id === newTplId);
+    if (tpl) {
+      setModalSubject(tpl.subject || '');
+      setModalBody(tpl.body || '');
+      setModalFromName(tpl.department || 'Head Field');
+    }
+  };
+
+  const modalBaseTemplate = useMemo(
+    () => templates.find((t) => t.id === modalTemplateId) || templates[0] || null,
+    [templates, modalTemplateId]
+  );
+
+  const modalEffectiveTemplate = useMemo(() => {
+    if (!modalBaseTemplate) return null;
+    return {
+      ...modalBaseTemplate,
+      subject: modalSubject,
+      body: modalBody,
+    };
+  }, [modalBaseTemplate, modalSubject, modalBody]);
+
+  const previewClient = useMemo(
+    () =>
+      selectedRecipients.find((c) => c.id === previewClientId) ||
+      selectedRecipients[0] ||
+      null,
+    [selectedRecipients, previewClientId]
+  );
+
+  const runBatchSend = async (recipientsToSend, effectiveTemplate, senderInfo, label) => {
     cancelRef.current = false;
     setSending(true);
 
     const job = {
       id: `cmp_${Date.now()}`,
       name: label,
-      mode: smtpConfig?.mode || 'simulation',
       status: 'running',
       total: recipientsToSend.length,
       sent: 0,
       failed: 0,
-      skipped: 0,
+      effectiveTemplate,
+      senderInfo,
       results: recipientsToSend.map((r) => ({
         id: r.id,
         name: r.name,
         email: r.email,
         department: r.department,
         status: 'pending',
-        templateUsed: null,
+        templateUsed: effectiveTemplate?.department || 'Template',
         error: null,
         previewUrl: null,
       })),
     };
     setActiveCampaign({ ...job, results: [...job.results] });
-
-    const delayMs = Number(smtpConfig?.delayMs) || 100;
-    const isSimulation = smtpConfig?.mode !== 'smtp';
 
     for (let i = 0; i < recipientsToSend.length; i++) {
       if (cancelRef.current) {
@@ -243,60 +270,33 @@ export default function SpreadsheetTab({
       }
 
       const client = recipientsToSend[i];
-      const tpl = resolveTemplate(client.department);
-      if (!tpl) {
-        job.results[i] = {
-          ...job.results[i],
-          status: 'skipped',
-          error: 'No template found',
-        };
-        job.skipped++;
-        setActiveCampaign({ ...job, results: [...job.results] });
-        continue;
-      }
-
-      const rowOv = rowOverrides[client.id];
-      const effectiveTemplate = {
-        ...tpl,
-        subject: rowOv?.subject || subjectOverride.trim() || tpl.subject,
-        body: rowOv?.body || bodyOverride.trim() || tpl.body,
-      };
 
       try {
-        if (isSimulation) {
-          await sleep(Math.min(delayMs, 30));
-          job.results[i] = {
-            ...job.results[i],
-            status: 'sent',
-            templateUsed: tpl.department,
-          };
-          job.sent++;
-        } else {
-          const res = await api.sendSingleEmail({
-            smtpConfig,
-            template: effectiveTemplate,
-            client: {
-              name: client.name,
-              email: client.email,
-              department: client.department,
-            },
-          });
-          job.results[i] = {
-            ...job.results[i],
-            status: 'sent',
-            templateUsed: tpl.department,
-            previewUrl: res.previewUrl || null,
-          };
-          job.sent++;
-          if (delayMs > 0 && i < recipientsToSend.length - 1) {
-            await sleep(delayMs);
-          }
+        const res = await api.sendSingleEmail({
+          smtpConfig: {
+            fromName: senderInfo.fromName,
+            fromEmail: senderInfo.fromEmail,
+          },
+          template: effectiveTemplate,
+          client: {
+            name: client.name,
+            email: client.email,
+            department: client.department,
+          },
+        });
+        job.results[i] = {
+          ...job.results[i],
+          status: 'sent',
+          previewUrl: res.previewUrl || null,
+        };
+        job.sent++;
+        if (i < recipientsToSend.length - 1) {
+          await sleep(40);
         }
       } catch (err) {
         job.results[i] = {
           ...job.results[i],
           status: 'failed',
-          templateUsed: tpl.department,
           error: err.message || 'Send failed',
         };
         job.failed++;
@@ -313,11 +313,17 @@ export default function SpreadsheetTab({
     notify(`Finished: ${job.sent} sent, ${job.failed} failed`, job.failed > 0 ? 'info' : 'success');
   };
 
-  const handleSend = () => {
-    if (selectedRecipients.length === 0) return;
+  const handleConfirmSend = () => {
+    if (!modalEffectiveTemplate || selectedRecipients.length === 0) return;
+    setSendModalOpen(false);
     runBatchSend(
       selectedRecipients,
-      `${fileName || 'Clients'} (${selectedRecipients.length})`
+      modalEffectiveTemplate,
+      {
+        fromName: modalFromName.trim() || modalEffectiveTemplate.department || 'Head Field',
+        fromEmail: modalFromEmail.trim() || 'greetings@headfield.com',
+      },
+      `${modalEffectiveTemplate.department} (${selectedRecipients.length} clients)`
     );
   };
 
@@ -328,39 +334,39 @@ export default function SpreadsheetTab({
 
   const handleRetry = () => {
     if (!activeCampaign) return;
-    const failed = activeCampaign.results.filter(
-      (r) => r.status === 'failed' || r.status === 'skipped'
-    );
+    const failed = activeCampaign.results.filter((r) => r.status === 'failed');
     if (failed.length === 0) return;
-    runBatchSend(failed, `${activeCampaign.name} (Retry ${failed.length})`);
+    runBatchSend(
+      failed,
+      activeCampaign.effectiveTemplate,
+      activeCampaign.senderInfo,
+      `${activeCampaign.name} (Retry ${failed.length})`
+    );
   };
 
-  const processed =
-    (activeCampaign?.sent || 0) +
-    (activeCampaign?.failed || 0) +
-    (activeCampaign?.skipped || 0);
+  const processed = (activeCampaign?.sent || 0) + (activeCampaign?.failed || 0);
   const progressPct = activeCampaign?.total
     ? Math.round((processed / activeCampaign.total) * 100)
     : 0;
 
   return (
     <div className="space-y-5">
-      {/* 1. Simple Upload Bar */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      {/* 1. Upload Card */}
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 className="text-base font-bold text-slate-900">
               Upload Client Spreadsheet (.xlsx, .xls, .csv)
             </h2>
             <p className="text-xs text-slate-500">
-              Columns needed: Name, Email ID, and Department.
+              Filter by Department, select clients all at once or one by one, then click Send Email to choose a brand template and preview.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={downloadSampleCsv}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
               <Download className="h-3.5 w-3.5" />
               Sample CSV
@@ -368,11 +374,11 @@ export default function SpreadsheetTab({
             <button
               type="button"
               onClick={handleLoadSample}
-              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
             >
               Load Sample Data
             </button>
-            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-slate-800">
               <Upload className="h-3.5 w-3.5" />
               {fileName ? 'Change File' : 'Upload Sheet'}
               <input
@@ -387,17 +393,16 @@ export default function SpreadsheetTab({
 
         {rows.length > 0 && (
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200 pt-4 sm:grid-cols-4">
-            <div className="text-xs">
-              <span className="text-slate-500">File:</span>{' '}
-              <span className="font-semibold text-slate-900">{fileName}</span>
-              <div className="text-slate-500">{rows.length} rows found</div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs">
+              <span className="text-slate-500">Loaded File:</span>{' '}
+              <div className="truncate font-semibold text-slate-900">{fileName}</div>
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-medium text-slate-600">Name Column</label>
               <select
                 value={mapping.nameCol}
                 onChange={(e) => updateMapping('nameCol', e.target.value)}
-                className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
               >
                 <option value="">-- Select --</option>
                 {headers.map((h) => (
@@ -410,7 +415,7 @@ export default function SpreadsheetTab({
               <select
                 value={mapping.emailCol}
                 onChange={(e) => updateMapping('emailCol', e.target.value)}
-                className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
               >
                 <option value="">-- Select --</option>
                 {headers.map((h) => (
@@ -423,7 +428,7 @@ export default function SpreadsheetTab({
               <select
                 value={mapping.deptCol}
                 onChange={(e) => updateMapping('deptCol', e.target.value)}
-                className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
               >
                 <option value="">-- Select --</option>
                 {headers.map((h) => (
@@ -437,13 +442,15 @@ export default function SpreadsheetTab({
 
       {/* Empty State */}
       {rows.length === 0 ? (
-        <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white p-12 text-center hover:border-amber-500">
-          <FileSpreadsheet className="mb-3 h-10 w-10 text-amber-600" />
-          <div className="text-sm font-semibold text-slate-800">
+        <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white/80 p-14 text-center transition hover:border-amber-500 hover:bg-amber-50/30">
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+            <FileSpreadsheet className="h-6 w-6" />
+          </div>
+          <div className="text-sm font-bold text-slate-800">
             Click to upload your Excel or CSV spreadsheet
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            Or click "Load Sample Data" above to try it immediately
+            Supports Name, Email ID, and Department / Website Name columns &mdash; or click &ldquo;Load Sample Data&rdquo; above
           </div>
           <input
             type="file"
@@ -454,292 +461,188 @@ export default function SpreadsheetTab({
         </label>
       ) : (
         <>
-          {/* Department Pills */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => { setDeptFilter('ALL'); setPage(1); }}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                deptFilter === 'ALL'
-                  ? 'bg-slate-900 text-white'
-                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              All ({rows.length})
-            </button>
-            {departments.map((d) => (
-              <div key={d.department} className="inline-flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeptFilter(deptFilter === d.department ? 'ALL' : d.department);
-                    setPage(1);
-                  }}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                    deptFilter === d.department
-                      ? 'bg-amber-600 text-white'
-                      : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {d.department} ({d.count})
-                </button>
-                {!d.exact && (
-                  <button
-                    type="button"
-                    onClick={() => onCreateMissingTemplate(d.department)}
-                    title={`Create dedicated template for ${d.department}`}
-                    className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-800 hover:bg-amber-200"
-                  >
-                    <PlusCircle className="h-3 w-3" />
-                    Template
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Template of the Day Selector */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          {/* Quick Summary Strip */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3 shadow-xs">
+              <Users className="h-4 w-4 text-slate-500" />
               <div>
-                <h3 className="text-sm font-semibold text-slate-900">Select Template of the Day</h3>
-                <p className="text-xs text-slate-500">
-                  Pick one template to send to everyone today, or auto-match each client&apos;s department.
-                </p>
+                <div className="text-[11px] text-slate-500">Total Rows</div>
+                <div className="text-sm font-bold text-slate-900">{rows.length}</div>
               </div>
-              {selectedDayTemplate && (
-                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                  Selected: {selectedDayTemplate.department}
-                </span>
-              )}
             </div>
-
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-              <button
-                type="button"
-                onClick={() => setTemplateOfTheDayId('auto')}
-                className={`flex flex-col justify-between rounded-lg border p-3 text-left transition ${
-                  templateOfTheDayId === 'auto'
-                    ? 'border-amber-600 bg-amber-50 ring-1 ring-amber-600'
-                    : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                }`}
-              >
-                <div className="text-xs font-semibold text-slate-900">Auto-Match by Department</div>
-                <div className="mt-1 text-[11px] text-slate-600">
-                  Uses each client&apos;s Department column automatically.
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3 shadow-xs">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <div>
+                <div className="text-[11px] text-slate-500">Valid Emails</div>
+                <div className="text-sm font-bold text-slate-900">{validTotalCount}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3 shadow-xs">
+              <Filter className="h-4 w-4 text-amber-600" />
+              <div>
+                <div className="text-[11px] text-slate-500">Active Filter</div>
+                <div className="truncate text-sm font-bold text-slate-900">
+                  {deptFilter === 'ALL' ? 'All Departments' : deptFilter}
                 </div>
-              </button>
-
-              {templates.map((tpl) => {
-                const isPicked = templateOfTheDayId === tpl.id;
-                return (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    onClick={() => setTemplateOfTheDayId(tpl.id)}
-                    className={`flex items-center gap-3 rounded-lg border p-2.5 text-left transition ${
-                      isPicked
-                        ? 'border-amber-600 bg-amber-50 ring-1 ring-amber-600'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
-                  >
-                    {tpl.posterUrl && (
-                      <img
-                        src={tpl.posterUrl}
-                        alt={tpl.department}
-                        className="h-12 w-12 shrink-0 rounded border border-slate-200 object-cover"
-                      />
-                    )}
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold text-slate-900">
-                        {tpl.department}
-                      </div>
-                      <div className="truncate text-[11px] text-slate-500">{tpl.subject}</div>
-                    </div>
-                  </button>
-                );
-              })}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 shadow-xs">
+              <CheckSquare className="h-4 w-4 text-amber-700" />
+              <div>
+                <div className="text-[11px] text-amber-800">Selected Clients</div>
+                <div className="text-sm font-bold text-amber-950">{selectedRecipients.length}</div>
+              </div>
             </div>
           </div>
 
-          {/* Optional Batch Subject / Description Override */}
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setShowCustomMail((v) => !v)}
-              className="flex w-full items-center justify-between text-xs font-semibold text-slate-800"
-            >
-              <span className="inline-flex items-center gap-2">
-                <SlidersHorizontal className="h-3.5 w-3.5 text-amber-600" />
-                Optional: Override Subject & Description for this send
-              </span>
-              <span className="text-slate-500">{showCustomMail ? 'Hide' : 'Edit'}</span>
-            </button>
-            {showCustomMail && (
-              <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-200 pt-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Custom Subject (leave blank to use template)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Happy Thanksgiving, {{name}}!"
-                    value={subjectOverride}
-                    onChange={(e) => setSubjectOverride(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Custom Description / Message (leave blank to use template)
-                  </label>
-                  <textarea
-                    rows={2}
-                    placeholder="Optional custom description for selected clients..."
-                    value={bodyOverride}
-                    onChange={(e) => setBodyOverride(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Client Selection Table */}
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
-              <div className="flex flex-wrap items-center gap-2">
+          {/* Client Table with Department Filter Column */}
+          <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/50 p-4">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <div className="relative">
-                  <Search className="absolute top-2 left-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <Search className="absolute top-2.5 left-3 h-3.5 w-3.5 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Search clients..."
+                    placeholder="Search name or email..."
                     value={search}
                     onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                    className="w-52 rounded-lg border border-slate-300 py-1.5 pr-3 pl-8 text-xs focus:border-amber-500 focus:outline-none"
+                    className="w-56 rounded-xl border border-slate-300 bg-white py-1.5 pr-3 pl-8 text-xs focus:border-amber-500 focus:outline-none"
                   />
                 </div>
+
+                <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5">
+                  <Filter className="h-3.5 w-3.5 text-amber-600" />
+                  <span className="text-[11px] font-medium text-slate-500">Department:</span>
+                  <select
+                    aria-label="Filter by Department"
+                    value={deptFilter}
+                    onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }}
+                    className="bg-transparent text-xs font-semibold text-slate-900 focus:outline-none"
+                  >
+                    <option value="ALL">All Departments ({rows.length})</option>
+                    {departmentList.map((d) => (
+                      <option key={d.department} value={d.department}>
+                        {d.department} ({d.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => selectAllFiltered(true)}
-                  className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  onClick={toggleSelectAllFiltered}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                 >
-                  Select All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAllFiltered(false)}
-                  className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Clear
+                  {allFilteredSelected ? 'Deselect All' : `Select All (${filteredValidIds.length})`}
                 </button>
               </div>
 
               <button
                 type="button"
                 disabled={selectedRecipients.length === 0 || sending}
-                onClick={handleSend}
-                className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
+                onClick={openSendModal}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:from-amber-700 hover:to-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Send className="h-3.5 w-3.5" />
                 {sending
                   ? `Sending (${processed}/${activeCampaign?.total || selectedRecipients.length})...`
-                  : `Send Emails to ${selectedRecipients.length} Clients (${
-                      smtpConfig?.mode === 'smtp' ? 'Live SMTP' : 'Test Mode'
-                    })`}
+                  : `Send Email (${selectedRecipients.length} Selected)`}
               </button>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase text-slate-600">
+                <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
                   <tr>
-                    <th className="w-10 px-4 py-2.5">Pick</th>
-                    <th className="px-4 py-2.5">Client Name</th>
-                    <th className="px-4 py-2.5">Email ID</th>
-                    <th className="px-4 py-2.5">Department</th>
-                    <th className="px-4 py-2.5">Template</th>
-                    <th className="px-4 py-2.5 text-right">Preview / Edit</th>
+                    <th className="w-12 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all visible clients"
+                        checked={allFilteredSelected}
+                        disabled={filteredValidIds.length === 0}
+                        onChange={toggleSelectAllFiltered}
+                        className="rounded border-slate-300 text-amber-600"
+                      />
+                    </th>
+                    <th className="px-4 py-3">Client Name</th>
+                    <th className="px-4 py-3">Email ID</th>
+                    <th className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span>Department</span>
+                        <select
+                          aria-label="Column Filter Department"
+                          value={deptFilter}
+                          onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }}
+                          className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold normal-case text-slate-700 focus:border-amber-500 focus:outline-none"
+                        >
+                          <option value="ALL">All</option>
+                          {departmentList.map((d) => (
+                            <option key={d.department} value={d.department}>
+                              {d.department}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {pagedRows.map((row) => {
-                    const tpl = resolveTemplate(row.department);
-                    const rowOv = rowOverrides[row.id];
-                    const effectiveTpl = tpl
-                      ? {
-                          ...tpl,
-                          subject: rowOv?.subject || subjectOverride || tpl.subject,
-                          body: rowOv?.body || bodyOverride || tpl.body,
-                        }
-                      : null;
-
-                    return (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(row.id)}
-                            disabled={!row.validEmail}
-                            onChange={() => toggleRow(row.id)}
-                            className="rounded border-slate-300 text-amber-600"
-                          />
-                        </td>
-                        <td className="px-4 py-2.5 font-medium text-slate-900">
-                          {row.name || '—'}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <span className={row.validEmail ? 'text-slate-700' : 'text-red-600'}>
-                            {row.email || '(missing)'}
+                  {pagedRows.map((row) => (
+                    <tr
+                      key={row.id}
+                      onClick={() => row.validEmail && toggleRow(row.id)}
+                      className={`transition ${
+                        row.validEmail
+                          ? selectedIds.has(row.id)
+                            ? 'cursor-pointer bg-amber-50/40 hover:bg-amber-50/70'
+                            : 'cursor-pointer hover:bg-slate-50'
+                          : 'bg-red-50/30'
+                      }`}
+                    >
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          disabled={!row.validEmail}
+                          onChange={() => toggleRow(row.id)}
+                          className="rounded border-slate-300 text-amber-600"
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-900">
+                        {row.name || '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={row.validEmail ? 'text-slate-600' : 'font-medium text-red-600'}>
+                          {row.email || '(missing)'}
+                        </span>
+                        {!row.validEmail && (
+                          <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                            Invalid Email
                           </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-700">{row.department || '—'}</td>
-                        <td className="px-4 py-2.5">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-                            {tpl?.department || 'None'}
-                          </span>
-                          {rowOv && (
-                            <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                              Custom
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            disabled={!effectiveTpl}
-                            onClick={() =>
-                              setPreviewData({
-                                row,
-                                template: effectiveTpl,
-                                subject: rowOv?.subject || subjectOverride || tpl?.subject || '',
-                                body: rowOv?.body || bodyOverride || tpl?.body || '',
-                              })
-                            }
-                            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
-                          >
-                            <Eye className="h-3 w-3" />
-                            Preview / Edit
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-800">
+                          {row.department || 'Unspecified'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
 
             {totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5 text-xs text-slate-600">
+              <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-xs text-slate-600">
                 <span>
-                  Page {page} of {totalPages} ({filteredRows.length} rows)
+                  Page {page} of {totalPages} ({filteredRows.length} rows shown)
                 </span>
                 <div className="flex gap-1.5">
                   <button
                     type="button"
                     disabled={page <= 1}
                     onClick={() => setPage((p) => p - 1)}
-                    className="rounded border border-slate-300 px-2.5 py-1 disabled:opacity-40"
+                    className="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40"
                   >
                     Prev
                   </button>
@@ -747,7 +650,7 @@ export default function SpreadsheetTab({
                     type="button"
                     disabled={page >= totalPages}
                     onClick={() => setPage((p) => p + 1)}
-                    className="rounded border border-slate-300 px-2.5 py-1 disabled:opacity-40"
+                    className="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40"
                   >
                     Next
                   </button>
@@ -760,10 +663,10 @@ export default function SpreadsheetTab({
 
       {/* Live Campaign Progress & Delivery Results */}
       {activeCampaign && (
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="space-y-4 rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-slate-900">
+              <h3 className="text-sm font-bold text-slate-900">
                 Delivery Status — {activeCampaign.name}
               </h3>
               <p className="text-xs text-slate-500">
@@ -805,12 +708,12 @@ export default function SpreadsheetTab({
 
           <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-amber-600 transition-all"
+              className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-600 transition-all"
               style={{ width: `${progressPct}%` }}
             />
           </div>
 
-          <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
+          <div className="max-h-64 overflow-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-xs">
               <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600">
                 <tr>
@@ -863,90 +766,169 @@ export default function SpreadsheetTab({
         </div>
       )}
 
-      {/* Row Preview + Per-Mail Subject & Description Modal */}
-      {previewData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="relative max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl bg-white p-5 shadow-2xl">
+      {/* Send Email & Live Preview Pop-up Modal */}
+      {sendModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="relative max-h-[94vh] w-full max-w-5xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
             <button
               type="button"
-              onClick={() => setPreviewData(null)}
-              className="absolute top-3 right-3 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+              aria-label="Close send popup"
+              onClick={() => setSendModalOpen(false)}
+              className="absolute top-4 right-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
             >
               <X className="h-5 w-5" />
             </button>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-              <div className="space-y-3 lg:col-span-5">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Customize Email for {previewData.row.name || previewData.row.email}
-                </h3>
+            <div className="mb-5 border-b border-slate-200 pb-3.5">
+              <h3 className="text-base font-bold text-slate-900">
+                Compose & Preview Email ({selectedRecipients.length} Clients Selected)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Select a brand template, verify From/To/Subject and client preview, then click Send.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
+              {/* Left: Template, Sender, Recipient Switcher, Subject */}
+              <div className="space-y-4 md:col-span-5">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                    1. Select Brand Template
+                  </label>
+                  <div className="flex items-center gap-3">
+                    {modalBaseTemplate?.logoUrl && (
+                      <img
+                        src={modalBaseTemplate.logoUrl}
+                        alt={modalBaseTemplate.department}
+                        className="h-10 w-24 shrink-0 rounded-lg border border-slate-200 bg-white object-contain p-1"
+                      />
+                    )}
+                    <select
+                      aria-label="Select Template"
+                      value={modalTemplateId}
+                      onChange={(e) => handleModalTemplateChange(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium focus:border-amber-500 focus:outline-none"
+                    >
+                      {templates.map((tpl) => (
+                        <option key={tpl.id} value={tpl.id}>
+                          {tpl.department}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      From Name
+                    </label>
+                    <input
+                      type="text"
+                      value={modalFromName}
+                      onChange={(e) => setModalFromName(e.target.value)}
+                      placeholder="Head Field"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      From Email ID
+                    </label>
+                    <input
+                      type="email"
+                      value={modalFromEmail}
+                      onChange={(e) => setModalFromEmail(e.target.value)}
+                      placeholder="sender@company.com"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Subject for this client
+                  <label className="mb-1 block text-xs font-semibold text-slate-700">
+                    Previewing Client (To Email ID)
+                  </label>
+                  <select
+                    aria-label="Previewing Client"
+                    value={previewClient?.id || ''}
+                    onChange={(e) => setPreviewClientId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                  >
+                    {selectedRecipients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} &lt;{c.email}&gt; ({c.department || 'N/A'})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Each of the {selectedRecipients.length} selected client(s) will receive this email personalized with their own name.
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-700">
+                    Email Subject
                   </label>
                   <input
                     type="text"
-                    value={previewData.subject}
-                    onChange={(e) =>
-                      setPreviewData((prev) => ({
-                        ...prev,
-                        subject: e.target.value,
-                        template: { ...prev.template, subject: e.target.value },
-                      }))
-                    }
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs"
+                    value={modalSubject}
+                    onChange={(e) => setModalSubject(e.target.value)}
+                    placeholder="Happy Thanksgiving, {{name}}!"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Description / Message for this client
+                  <label className="mb-1 block text-xs font-semibold text-slate-700">
+                    Email Description / Message
                   </label>
                   <textarea
-                    rows={6}
-                    value={previewData.body}
-                    onChange={(e) =>
-                      setPreviewData((prev) => ({
-                        ...prev,
-                        body: e.target.value,
-                        template: { ...prev.template, body: e.target.value },
-                      }))
-                    }
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs leading-relaxed"
+                    rows={5}
+                    value={modalBody}
+                    onChange={(e) => setModalBody(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs leading-relaxed focus:border-amber-500 focus:outline-none"
                   />
                 </div>
-                <div className="flex gap-2">
+
+                {mailStatus && !mailStatus.configured && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] text-red-800">
+                    <span className="font-semibold">Mail Server Not Configured:</span> Real emails cannot be delivered yet. Add <code className="font-mono">SMTP_HOST</code>, <code className="font-mono">SMTP_PORT</code>, <code className="font-mono">SMTP_USER</code>, and <code className="font-mono">SMTP_PASS</code> (or <code className="font-mono">RESEND_API_KEY</code>) to <code className="font-mono">.env</code> locally or Vercel Environment Variables.
+                  </div>
+                )}
+                {mailStatus?.configured && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800">
+                    <span className="font-semibold">Mail Server Connected:</span> {mailStatus.host} ({mailStatus.provider?.toUpperCase()})
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => {
-                      setRowOverrides((prev) => ({
-                        ...prev,
-                        [previewData.row.id]: {
-                          subject: previewData.subject,
-                          body: previewData.body,
-                        },
-                      }));
-                      setPreviewData(null);
-                      notify(`Saved custom subject & description for ${previewData.row.name}`, 'success');
-                    }}
-                    className="rounded-lg bg-amber-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+                    onClick={handleConfirmSend}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:from-amber-700 hover:to-orange-700"
                   >
-                    Save for this Client
+                    <Send className="h-3.5 w-3.5" />
+                    Send to All {selectedRecipients.length} Selected Clients
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPreviewData(null)}
-                    className="rounded-lg border border-slate-300 px-3.5 py-2 text-xs font-medium text-slate-700"
+                    onClick={() => setSendModalOpen(false)}
+                    className="rounded-xl border border-slate-300 px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Close
+                    Cancel
                   </button>
                 </div>
               </div>
 
-              <div className="lg:col-span-7">
+              {/* Right: Exact Inbox Preview as Client Sees It */}
+              <div className="md:col-span-7">
                 <EmailPreviewPane
-                  template={previewData.template}
-                  client={previewData.row}
-                  title={`Preview: ${previewData.row.name || previewData.row.email}`}
+                  template={modalEffectiveTemplate}
+                  client={previewClient}
+                  fromName={modalFromName || 'Head Field'}
+                  fromEmail={modalFromEmail || 'greetings@headfield.com'}
+                  title="Preview (As Client Will See It)"
                 />
               </div>
             </div>

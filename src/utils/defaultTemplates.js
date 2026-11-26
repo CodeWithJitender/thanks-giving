@@ -1,57 +1,90 @@
-const TEMPLATES_KEY = 'tg_templates_v2';
-const SMTP_KEY = 'tg_smtp_v2';
+const TEMPLATES_KEY = 'tg_templates_v3';
 
-export const DEFAULT_TEMPLATES = [
+const BRAND_DEFS = [
   {
-    id: 'dept-general',
-    department: 'General',
+    name: 'Head Field',
+    color: '#8b1e24',
     isDefault: true,
-    subject: 'Happy Thanksgiving from Head Field!',
-    greeting: 'Dear {{name}},',
-    body: `As Thanksgiving approaches, we want to take a moment to express our sincere gratitude for the trust you place in Head Field.\n\nWe are thankful for the opportunity to serve and advocate for our clients, and we greatly value the relationships we have built throughout the year. We wish you and your loved ones a happy Thanksgiving filled with warmth, joy, and time spent with family and friends.`,
-    logoUrl: '/uploads/default-logo-general.svg',
-    logoWidth: 210,
-    posterUrl: '/uploads/default-poster-general.svg',
-    updatedAt: '2026-11-26T00:00:00.000Z',
+    focus: 'talent and workforce solutions',
   },
   {
-    id: 'dept-sales',
-    department: 'Sales',
-    isDefault: false,
-    subject: 'Happy Thanksgiving, {{name}} — Thank You for Partnering With Us!',
-    greeting: 'Dear {{name}},',
-    body: `As Thanksgiving approaches, our Sales & Partnerships team wants to express our sincere gratitude for the trust you place in Head Field.\n\nWe are thankful for the opportunity to collaborate and grow alongside you, and we deeply value our partnership throughout the year. Wishing you and your loved ones a joyful Thanksgiving filled with warmth, happiness, and celebration.`,
-    logoUrl: '/uploads/default-logo-sales.svg',
-    logoWidth: 210,
-    posterUrl: '/uploads/default-poster-sales.svg',
-    updatedAt: '2026-11-26T00:00:00.000Z',
+    name: 'Glocal Edit',
+    color: '#312e81',
+    focus: 'editorial and content excellence',
   },
   {
-    id: 'dept-operations',
-    department: 'Operations',
-    isDefault: false,
-    subject: 'Warm Thanksgiving Wishes, {{name}} — From Operations',
-    greeting: 'Dear {{name}},',
-    body: `As Thanksgiving approaches, our Client Operations team wants to take a moment to thank you for your continued confidence in Head Field.\n\nWe are truly grateful for the chance to support your business every day and value the relationships we share. May your Thanksgiving be filled with peace, joy, and memorable moments with family and friends.`,
-    logoUrl: '/uploads/default-logo-operations.svg',
-    logoWidth: 210,
-    posterUrl: '/uploads/default-poster-operations.svg',
-    updatedAt: '2026-11-26T00:00:00.000Z',
+    name: 'Glocal BPO',
+    color: '#134e4a',
+    focus: 'business operations',
+  },
+  {
+    name: 'Glocal RPO',
+    color: '#1e3a8a',
+    focus: 'recruitment and hiring initiatives',
+  },
+  {
+    name: 'Glocal Accounting',
+    color: '#064e3b',
+    focus: 'accounting and financial operations',
+  },
+  {
+    name: 'HF Events',
+    color: '#881337',
+    focus: 'memorable events and experiences',
+  },
+  {
+    name: 'Glocal Design',
+    color: '#4c1d95',
+    focus: 'creative design and branding',
+  },
+  {
+    name: 'Glocal LPO',
+    color: '#1e293b',
+    focus: 'legal process support',
+  },
+  {
+    name: 'Glocal Opportunities',
+    color: '#0c4a6e',
+    focus: 'career growth and global opportunities',
+  },
+  {
+    name: 'Glocal Assist',
+    color: '#164e63',
+    focus: 'dedicated virtual assistance',
+  },
+  {
+    name: 'Glocal Codes',
+    color: '#1e3a8a',
+    focus: 'software and technology engineering',
+  },
+  {
+    name: 'Glocal Studio',
+    color: '#701a75',
+    focus: 'media production and digital studio work',
+  },
+  {
+    name: 'HF Realtors',
+    color: '#14532d',
+    focus: 'real estate advisory and services',
   },
 ];
 
-export const DEFAULT_SMTP_CONFIG = {
-  mode: 'simulation',
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  user: '',
-  pass: '',
-  fromName: 'Head Field',
-  fromEmail: '',
-  replyTo: '',
-  delayMs: 150,
-};
+export const DEFAULT_TEMPLATES = BRAND_DEFS.map((b) => {
+  const slug = b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return {
+    id: `brand-${slug}`,
+    department: b.name,
+    brandColor: b.color,
+    isDefault: Boolean(b.isDefault),
+    subject: `Happy Thanksgiving, {{name}} — From ${b.name}!`,
+    greeting: 'Dear {{name}},',
+    body: `As Thanksgiving approaches, we want to take a moment to express our sincere gratitude for the trust you place in ${b.name}.\n\nWe are thankful for the opportunity to support your ${b.focus}, and we greatly value the relationship we have built throughout the year. We wish you and your loved ones a happy Thanksgiving filled with warmth, joy, and time spent with family and friends.`,
+    logoUrl: `/uploads/logo-${slug}.svg`,
+    logoWidth: 220,
+    posterUrl: `/uploads/poster-${slug}.svg`,
+    updatedAt: '2026-11-26T00:00:00.000Z',
+  };
+});
 
 export function loadStoredTemplates() {
   try {
@@ -74,31 +107,4 @@ export function saveStoredTemplates(templates) {
     // Ignore quota errors
   }
   return templates;
-}
-
-export function loadStoredSmtp() {
-  try {
-    const raw = localStorage.getItem(SMTP_KEY);
-    if (raw) {
-      return { ...DEFAULT_SMTP_CONFIG, ...JSON.parse(raw) };
-    }
-  } catch {
-    // Ignore storage errors
-  }
-  return DEFAULT_SMTP_CONFIG;
-}
-
-export function saveStoredSmtp(config) {
-  const merged = {
-    ...DEFAULT_SMTP_CONFIG,
-    ...config,
-    port: Number(config.port ?? DEFAULT_SMTP_CONFIG.port) || 587,
-    delayMs: Math.max(0, Number(config.delayMs ?? DEFAULT_SMTP_CONFIG.delayMs) || 0),
-  };
-  try {
-    localStorage.setItem(SMTP_KEY, JSON.stringify(merged));
-  } catch {
-    // Ignore quota errors
-  }
-  return merged;
 }
