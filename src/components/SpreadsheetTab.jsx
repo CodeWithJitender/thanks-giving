@@ -17,6 +17,11 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import {
+  clearStoredSheetState,
+  loadStoredUiPrefs,
+  saveStoredUiPrefs,
+} from '../utils/defaultTemplates';
+import {
   detectColumns,
   downloadSampleCsv,
   exportCampaignCsv,
@@ -41,7 +46,11 @@ export default function SpreadsheetTab({
   notify,
 }) {
   const [search, setSearch] = useState('');
-  const [deptFilter, setDeptFilter] = useState('ALL');
+  const [deptFilter, setDeptFilterState] = useState(() => loadStoredUiPrefs().deptFilter || 'ALL');
+  const setDeptFilter = (val) => {
+    setDeptFilterState(val);
+    saveStoredUiPrefs({ deptFilter: val });
+  };
   const [page, setPage] = useState(1);
   const [sending, setSending] = useState(false);
   const cancelRef = useRef(false);
@@ -388,6 +397,19 @@ export default function SpreadsheetTab({
                 className="hidden"
               />
             </label>
+            {rows.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSheetState(clearStoredSheetState());
+                  setDeptFilter('ALL');
+                  notify('Cleared saved spreadsheet data', 'info');
+                }}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Clear Sheet
+              </button>
+            )}
           </div>
         </div>
 
@@ -703,6 +725,15 @@ export default function SpreadsheetTab({
                 <Download className="h-3.5 w-3.5" />
                 Export CSV
               </button>
+              {activeCampaign.status !== 'running' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveCampaign(null)}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50"
+                >
+                  Clear Log
+                </button>
+              )}
             </div>
           </div>
 

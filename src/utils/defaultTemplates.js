@@ -1,4 +1,7 @@
 const TEMPLATES_KEY = 'tg_templates_v3';
+const SHEET_KEY = 'tg_sheet_v1';
+const CAMPAIGNS_KEY = 'tg_campaigns_v1';
+const UI_KEY = 'tg_ui_v1';
 
 const BRAND_DEFS = [
   {
@@ -86,6 +89,15 @@ export const DEFAULT_TEMPLATES = BRAND_DEFS.map((b) => {
   };
 });
 
+export const EMPTY_SHEET_STATE = {
+  fileName: '',
+  headers: [],
+  rawRows: [],
+  mapping: { nameCol: '', emailCol: '', deptCol: '' },
+  rows: [],
+  selectedIds: new Set(),
+};
+
 export function loadStoredTemplates() {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);
@@ -107,4 +119,119 @@ export function saveStoredTemplates(templates) {
     // Ignore quota errors
   }
   return templates;
+}
+
+export function loadStoredSheetState() {
+  try {
+    const raw = localStorage.getItem(SHEET_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.rows)) {
+        return {
+          ...EMPTY_SHEET_STATE,
+          ...parsed,
+          selectedIds: new Set(Array.isArray(parsed.selectedIds) ? parsed.selectedIds : []),
+        };
+      }
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return EMPTY_SHEET_STATE;
+}
+
+export function saveStoredSheetState(sheetState) {
+  const serializable = {
+    fileName: sheetState.fileName || '',
+    headers: sheetState.headers || [],
+    rawRows: sheetState.rawRows || [],
+    mapping: sheetState.mapping || { nameCol: '', emailCol: '', deptCol: '' },
+    rows: (sheetState.rows || []).map(({ raw: _raw, ...rest }) => rest),
+    selectedIds: Array.from(sheetState.selectedIds || []),
+  };
+  try {
+    localStorage.setItem(SHEET_KEY, JSON.stringify(serializable));
+  } catch {
+    // Retry without rawRows if spreadsheet is very large
+    try {
+      localStorage.setItem(
+        SHEET_KEY,
+        JSON.stringify({ ...serializable, rawRows: [] })
+      );
+    } catch {
+      // Ignore quota errors
+    }
+  }
+}
+
+export function clearStoredSheetState() {
+  try {
+    localStorage.removeItem(SHEET_KEY);
+  } catch {
+    // Ignore
+  }
+  return EMPTY_SHEET_STATE;
+}
+
+export function loadStoredCampaign() {
+  try {
+    const raw = localStorage.getItem(CAMPAIGNS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return null;
+}
+
+export function saveStoredCampaign(campaign) {
+  if (!campaign) {
+    try {
+      localStorage.removeItem(CAMPAIGNS_KEY);
+    } catch {
+      // Ignore
+    }
+    return;
+  }
+  try {
+    // Strip heavy inline data URLs if any so delivery log persists cleanly
+    const compact = {
+      ...campaign,
+      effectiveTemplate: campaign.effectiveTemplate
+        ? {
+            ...campaign.effectiveTemplate,
+            logoUrl: campaign.effectiveTemplate.logoUrl?.startsWith('data:')
+              ? ''
+              : campaign.effectiveTemplate.logoUrl,
+            posterUrl: campaign.effectiveTemplate.posterUrl?.startsWith('data:')
+              ? ''
+              : campaign.effectiveTemplate.posterUrl,
+          }
+        : null,
+    };
+    localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(compact));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+export function loadStoredUiPrefs() {
+  try {
+    const raw = localStorage.getItem(UI_KEY);
+    if (raw) return JSON.parse(raw) || {};
+  } catch {
+    // Ignore
+  }
+  return {};
+}
+
+export function saveStoredUiPrefs(patch) {
+  try {
+    const current = loadStoredUiPrefs();
+    localStorage.setItem(UI_KEY, JSON.stringify({ ...current, ...patch }));
+  } catch {
+    // Ignore
+  }
 }

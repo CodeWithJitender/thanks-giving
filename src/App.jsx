@@ -9,8 +9,14 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_TEMPLATES,
+  loadStoredCampaign,
+  loadStoredSheetState,
   loadStoredTemplates,
+  loadStoredUiPrefs,
+  saveStoredCampaign,
+  saveStoredSheetState,
   saveStoredTemplates,
+  saveStoredUiPrefs,
 } from './utils/defaultTemplates';
 import TemplatesTab from './components/TemplatesTab';
 import SpreadsheetTab from './components/SpreadsheetTab';
@@ -21,22 +27,42 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('templates');
+  const [uiPrefs] = useState(() => loadStoredUiPrefs());
+  const [activeTab, setActiveTab] = useState(() => uiPrefs.activeTab || 'templates');
   const [templates, setTemplates] = useState(() => loadStoredTemplates());
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    () => loadStoredTemplates()[0]?.id || null
+    () => uiPrefs.selectedTemplateId || loadStoredTemplates()[0]?.id || null
   );
-  const [activeCampaign, setActiveCampaign] = useState(null);
+  const [activeCampaign, setActiveCampaignState] = useState(() => loadStoredCampaign());
   const [toast, setToast] = useState(null);
 
-  const [sheetState, setSheetState] = useState({
-    fileName: '',
-    headers: [],
-    rawRows: [],
-    mapping: { nameCol: '', emailCol: '', deptCol: '' },
-    rows: [],
-    selectedIds: new Set(),
-  });
+  const [sheetState, setSheetStateRaw] = useState(() => loadStoredSheetState());
+
+  const setSheetState = useCallback((nextOrUpdater) => {
+    setSheetStateRaw((prev) => {
+      const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
+      saveStoredSheetState(next);
+      return next;
+    });
+  }, []);
+
+  const setActiveCampaign = useCallback((nextOrUpdater) => {
+    setActiveCampaignState((prev) => {
+      const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
+      saveStoredCampaign(next);
+      return next;
+    });
+  }, []);
+
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    saveStoredUiPrefs({ activeTab: tabId });
+  };
+
+  const handleSelectTemplateId = (id) => {
+    setSelectedTemplateId(id);
+    saveStoredUiPrefs({ selectedTemplateId: id });
+  };
 
   const notify = useCallback((message, type = 'info') => {
     setToast({ id: Date.now(), message, type });
@@ -101,14 +127,14 @@ export default function App() {
     saveStoredTemplates(next);
     setTemplates(next);
     if (selectedTemplateId === id && next.length > 0) {
-      setSelectedTemplateId(next[0].id);
+      handleSelectTemplateId(next[0].id);
     }
   };
 
   const handleResetDefaults = () => {
     saveStoredTemplates(DEFAULT_TEMPLATES);
     setTemplates(DEFAULT_TEMPLATES);
-    setSelectedTemplateId(DEFAULT_TEMPLATES[0].id);
+    handleSelectTemplateId(DEFAULT_TEMPLATES[0].id);
     notify(`Restored all ${DEFAULT_TEMPLATES.length} organization brand templates`, 'success');
   };
 
@@ -138,7 +164,7 @@ export default function App() {
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => handleTabChange(tab.id)}
                   className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition ${
                     active
                       ? 'bg-white text-slate-900 shadow-sm'
@@ -169,7 +195,7 @@ export default function App() {
           <TemplatesTab
             templates={templates}
             selectedId={selectedTemplateId}
-            onSelectId={setSelectedTemplateId}
+            onSelectId={handleSelectTemplateId}
             onCreate={handleCreateTemplate}
             onUpdate={handleUpdateTemplate}
             onDelete={handleDeleteTemplate}
