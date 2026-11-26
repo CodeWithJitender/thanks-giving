@@ -14,8 +14,20 @@ export async function getDb() {
   if (!clientPromise) {
     const client = new MongoClient(uri, {
       serverSelectionTimeoutMS: 8000,
+      tls: true,
+      family: 4,
     });
-    clientPromise = client.connect();
+    clientPromise = client.connect().catch((err) => {
+      clientPromise = null;
+      globalThis._mongoClientPromise = null;
+      const msg = String(err?.message || err || '');
+      if (msg.includes('alert number 80') || msg.includes('tlsv1 alert internal error')) {
+        throw new Error(
+          'MongoDB Atlas blocked the server IP (SSL alert 80). Open MongoDB Atlas -> Network Access -> Add IP Address -> Allow Access from Anywhere (0.0.0.0/0).'
+        );
+      }
+      throw err;
+    });
     globalThis._mongoClientPromise = clientPromise;
   }
   const client = await clientPromise;

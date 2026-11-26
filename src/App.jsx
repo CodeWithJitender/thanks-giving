@@ -130,13 +130,18 @@ function MainApp() {
 
   const saveSheetImmediately = useCallback(async (nextSheet) => {
     if (sheetSyncTimer.current) clearTimeout(sheetSyncTimer.current);
-    setSheetStateRaw(nextSheet);
-    if (!nextSheet.fileName && (!nextSheet.rows || nextSheet.rows.length === 0)) {
-      await api.clearSheet();
-    } else {
-      await api.saveSheet(serializeSheet(nextSheet));
+    try {
+      if (!nextSheet.fileName && (!nextSheet.rows || nextSheet.rows.length === 0)) {
+        await api.clearSheet();
+      } else {
+        await api.saveSheet(serializeSheet(nextSheet));
+      }
+      setSheetStateRaw(nextSheet);
+      setDbStatus('connected');
+    } catch (err) {
+      setDbStatus('offline');
+      throw err;
     }
-    setDbStatus('connected');
   }, []);
 
   const setSheetState = useCallback((nextOrUpdater) => {
