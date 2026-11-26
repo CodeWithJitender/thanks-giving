@@ -276,7 +276,7 @@ export default function AdminConsole() {
         rows: normalized,
         selectedIds: [],
       });
-      notify(`Loaded and saved ${normalized.length} sample rows on server`, 'success');
+      notify(`Loaded ${normalized.length} sample rows`, 'success');
       await loadAll();
     } catch (err) {
       notify(err.message, 'error');

@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Info,
-  Database,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -46,7 +45,6 @@ function MainApp() {
   const [sentHistory, setSentHistory] = useState([]);
   const [sheetState, setSheetStateRaw] = useState(EMPTY_SHEET_STATE);
   const [loadingServer, setLoadingServer] = useState(true);
-  const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'connected' | 'offline'
   const [toast, setToast] = useState(null);
 
   const sheetSyncTimer = useRef(null);
@@ -101,11 +99,8 @@ function MainApp() {
         if (Array.isArray(histRes.history)) {
           setSentHistory(histRes.history);
         }
-
-        setDbStatus('connected');
       } catch (err) {
         if (active) {
-          setDbStatus('offline');
           notify(err?.message || 'Unable to reach server database', 'error');
         }
       } finally {
@@ -130,18 +125,12 @@ function MainApp() {
 
   const saveSheetImmediately = useCallback(async (nextSheet) => {
     if (sheetSyncTimer.current) clearTimeout(sheetSyncTimer.current);
-    try {
-      if (!nextSheet.fileName && (!nextSheet.rows || nextSheet.rows.length === 0)) {
-        await api.clearSheet();
-      } else {
-        await api.saveSheet(serializeSheet(nextSheet));
-      }
-      setSheetStateRaw(nextSheet);
-      setDbStatus('connected');
-    } catch (err) {
-      setDbStatus('offline');
-      throw err;
+    if (!nextSheet.fileName && (!nextSheet.rows || nextSheet.rows.length === 0)) {
+      await api.clearSheet();
+    } else {
+      await api.saveSheet(serializeSheet(nextSheet));
     }
+    setSheetStateRaw(nextSheet);
   }, []);
 
   const setSheetState = useCallback((nextOrUpdater) => {
@@ -153,10 +142,7 @@ function MainApp() {
         api.clearSheet().catch(() => {});
       } else {
         sheetSyncTimer.current = setTimeout(() => {
-          api
-            .saveSheet(serializeSheet(next))
-            .then(() => setDbStatus('connected'))
-            .catch(() => setDbStatus('offline'));
+          api.saveSheet(serializeSheet(next)).catch(() => {});
         }, 300);
       }
 
@@ -188,10 +174,7 @@ function MainApp() {
                 }
               : null,
           };
-          api
-            .saveCampaign(compact)
-            .then(() => setDbStatus('connected'))
-            .catch(() => setDbStatus('offline'));
+          api.saveCampaign(compact).catch(() => {});
         }, delay);
       }
 
@@ -208,9 +191,8 @@ function MainApp() {
         if (Array.isArray(res.history)) {
           setSentHistory(res.history);
         }
-        setDbStatus('connected');
       })
-      .catch(() => setDbStatus('offline'));
+      .catch(() => {});
   }, []);
 
   const handleClearSentHistory = useCallback(() => {
@@ -229,14 +211,12 @@ function MainApp() {
   const handleCreateTemplate = async (payload) => {
     const res = await api.createTemplate(payload);
     setTemplates(res.templates);
-    setDbStatus('connected');
     return res.template;
   };
 
   const handleUpdateTemplate = async (id, payload) => {
     const res = await api.updateTemplate(id, payload);
     setTemplates(res.templates);
-    setDbStatus('connected');
     return res.template;
   };
 
@@ -246,7 +226,6 @@ function MainApp() {
     }
     const res = await api.deleteTemplate(id);
     setTemplates(res.templates);
-    setDbStatus('connected');
     if (selectedTemplateId === id && res.templates.length > 0) {
       handleSelectTemplateId(res.templates[0].id);
     }
@@ -256,8 +235,7 @@ function MainApp() {
     const res = await api.resetTemplates();
     setTemplates(res.templates);
     handleSelectTemplateId(res.templates[0].id);
-    setDbStatus('connected');
-    notify(`Restored all ${res.templates.length} organization brand templates on server`, 'success');
+    notify(`Restored all ${res.templates.length} organization brand templates`, 'success');
   };
 
   return (
@@ -274,22 +252,6 @@ function MainApp() {
               </h1>
               <div className="flex items-center gap-2 text-[11px] text-slate-500">
                 <span>Organization Brand Templates &bull; Client Sheet &bull; Bulk Mailer</span>
-                <span
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    dbStatus === 'connected'
-                      ? 'bg-emerald-50 text-emerald-700'
-                      : dbStatus === 'connecting'
-                        ? 'bg-slate-100 text-slate-600'
-                        : 'bg-amber-50 text-amber-700'
-                  }`}
-                >
-                  <Database className="h-2.5 w-2.5" />
-                  {dbStatus === 'connected'
-                    ? 'Saved on Server'
-                    : dbStatus === 'connecting'
-                      ? 'Connecting Server...'
-                      : 'Server Offline'}
-                </span>
               </div>
             </div>
           </div>

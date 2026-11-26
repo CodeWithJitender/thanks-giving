@@ -88,7 +88,7 @@ export default function SpreadsheetTab({
       }
       setPage(1);
       setDeptFilter('ALL');
-      notify(`Uploaded and saved ${normalized.length} rows from ${parsed.fileName} on server`, 'success');
+      notify(`Loaded ${normalized.length} rows from ${parsed.fileName}`, 'success');
     } catch (err) {
       notify(err.message, 'error');
     } finally {
@@ -396,7 +396,7 @@ export default function SpreadsheetTab({
             </button>
             <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-slate-800">
               <Upload className="h-3.5 w-3.5" />
-              {uploadingSheet ? 'Saving on Server...' : 'Upload File'}
+              {uploadingSheet ? 'Uploading...' : 'Upload File'}
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
@@ -419,7 +419,7 @@ export default function SpreadsheetTab({
             Click to upload your Excel or CSV spreadsheet
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            Supports Name, Email ID, and Department / Website Name columns &mdash; saved directly on the server
+            Supports Name, Email ID, and Department / Website Name columns
           </div>
           <input
             type="file"
