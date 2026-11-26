@@ -24,6 +24,7 @@ import { api } from '../api';
 import {
   detectColumns,
   downloadSampleCsv,
+  downloadSampleXlsx,
   formatClientName,
   getSampleSpreadsheetRows,
   isValidEmail,
@@ -531,6 +532,14 @@ export default function AdminConsole() {
                     >
                       <Download className="h-3.5 w-3.5" />
                       Sample CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadSampleXlsx}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Sample .xlsx
                     </button>
                     <button
                       type="button"

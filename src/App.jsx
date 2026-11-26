@@ -20,8 +20,8 @@ import SpreadsheetTab from './components/SpreadsheetTab';
 import AdminConsole from './components/AdminConsole';
 
 const TABS = [
-  { id: 'templates', label: '1. Brand Templates', icon: LayoutTemplate },
-  { id: 'spreadsheet', label: '2. Client Sheet & Send', icon: FileSpreadsheet },
+  { id: 'spreadsheet', label: '1. Client Sheet & Send', icon: FileSpreadsheet },
+  { id: 'templates', label: '2. Brand Templates', icon: LayoutTemplate },
 ];
 
 export default function App() {
@@ -37,7 +37,7 @@ export default function App() {
 }
 
 function MainApp() {
-  const [activeTab, setActiveTab] = useState('templates');
+  const [activeTab, setActiveTab] = useState('spreadsheet');
   const [templates, setTemplates] = useState(DEFAULT_TEMPLATES);
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     () => DEFAULT_TEMPLATES[0]?.id || null

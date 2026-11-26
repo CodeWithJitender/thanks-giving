@@ -114,12 +114,20 @@ export function getSampleSpreadsheetRows() {
   ];
 }
 
-export function downloadSampleCsv() {
+function exportSampleWorkbook(filename) {
   const rows = getSampleSpreadsheetRows();
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Clients');
-  XLSX.writeFile(wb, 'sample-thanksgiving-clients.csv');
+  XLSX.writeFile(wb, filename);
+}
+
+export function downloadSampleCsv() {
+  exportSampleWorkbook('sample-thanksgiving-clients.csv');
+}
+
+export function downloadSampleXlsx() {
+  exportSampleWorkbook('sample-thanksgiving-clients.xlsx');
 }
 
 export function exportCampaignCsv(campaign) {
