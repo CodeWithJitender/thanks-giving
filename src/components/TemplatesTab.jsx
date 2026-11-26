@@ -22,7 +22,23 @@ function fileToDataUrl(file) {
   });
 }
 
-function ImageField({ label, value, onChange, onUpload, uploading, previewHeight = 'h-12' }) {
+const LOGO_BG_PRESETS = [
+  { label: 'White (Locked)', value: '#ffffff' },
+  { label: 'Dark Navy (For White Logos)', value: '#0f172a' },
+  { label: 'Black (For White Logos)', value: '#111827' },
+  { label: 'Warm Cream', value: '#fdfaf3' },
+];
+
+function ImageField({
+  label,
+  value,
+  bgColor,
+  onBgColorChange,
+  onChange,
+  onUpload,
+  uploading,
+  previewHeight = 'h-12',
+}) {
   const isDataUrl = Boolean(value && value.startsWith('data:'));
   const fullDisplayUrl =
     !isDataUrl && value && value.startsWith('/')
@@ -75,7 +91,8 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
           <img
             src={value}
             alt={label}
-            className={`${previewHeight} max-w-[180px] rounded-lg border border-slate-200 bg-white object-contain p-1`}
+            style={{ backgroundColor: bgColor || '#ffffff' }}
+            className={`${previewHeight} max-w-[180px] rounded-lg border border-slate-200 object-contain p-1.5`}
           />
           <div className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
             {isDataUrl ? (
@@ -87,6 +104,46 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
                 Saved link: <span className="font-mono text-slate-700">{fullDisplayUrl}</span>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {onBgColorChange && (
+        <div className="border-t border-slate-200/80 pt-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[11px] font-medium text-slate-600">
+              Locked Logo Background (won&apos;t change in Dark Mode):
+            </span>
+            <input
+              type="color"
+              aria-label="Custom logo background color"
+              value={bgColor || '#ffffff'}
+              onChange={(e) => onBgColorChange(e.target.value)}
+              className="h-5 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+            />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {LOGO_BG_PRESETS.map((p) => {
+              const active = (bgColor || '#ffffff').toLowerCase() === p.value;
+              return (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => onBgColorChange(p.value)}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium transition ${
+                    active
+                      ? 'border-amber-600 bg-amber-50 text-amber-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full border border-slate-300"
+                    style={{ backgroundColor: p.value }}
+                  />
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -394,6 +451,8 @@ export default function TemplatesTab({
             <ImageField
               label="1. Top Brand Logo (Upload or Image Link)"
               value={draft.logoUrl}
+              bgColor={draft.logoBgColor || '#ffffff'}
+              onBgColorChange={(val) => updateField('logoBgColor', val)}
               onChange={(val) => updateField('logoUrl', val)}
               onUpload={(e) => handleImageUpload('logoUrl', e)}
               uploading={uploadingField === 'logoUrl'}
