@@ -22,7 +22,6 @@ async function request(url, options = {}) {
 }
 
 export const api = {
-  // Tries local server upload first; falls back cleanly to inline dataUrl on static/serverless hosts like Vercel
   uploadImage: async (filename, dataUrl) => {
     try {
       const res = await request('/api/upload', {
@@ -41,13 +40,49 @@ export const api = {
     };
   },
 
+  // MongoDB-backed Templates
+  getTemplates: () => request('/api/templates'),
+  createTemplate: (payload) =>
+    request('/api/templates', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTemplate: (id, payload) =>
+    request(`/api/templates?id=${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...payload, id }),
+    }),
+  deleteTemplate: (id) =>
+    request(`/api/templates?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  resetTemplates: () =>
+    request('/api/templates', { method: 'POST', body: JSON.stringify({ action: 'reset' }) }),
+
+  // MongoDB-backed Sheet
+  getSheet: () => request('/api/sheet'),
+  saveSheet: (sheet) =>
+    request('/api/sheet', { method: 'PUT', body: JSON.stringify(sheet) }),
+  clearSheet: () => request('/api/sheet', { method: 'DELETE' }),
+
+  // MongoDB-backed Campaigns
+  getCampaigns: () => request('/api/campaigns'),
+  saveCampaign: (campaign) =>
+    request('/api/campaigns', { method: 'POST', body: JSON.stringify(campaign) }),
+  clearCampaigns: () => request('/api/campaigns', { method: 'DELETE' }),
+
+  // Admin Document Console (/admin/jkr19)
+  getAdminDocs: () => request('/api/admin-docs'),
+  saveAdminDoc: (collection, document) =>
+    request('/api/admin-docs', {
+      method: 'PUT',
+      body: JSON.stringify({ collection, document }),
+    }),
+  deleteAdminDoc: (collection, id) =>
+    request(
+      `/api/admin-docs?collection=${encodeURIComponent(collection)}&id=${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    ),
+  importAdminDocs: (payload) =>
+    request('/api/admin-docs', { method: 'POST', body: JSON.stringify(payload) }),
+
   getMailStatus: () => request('/api/mail-status'),
 
   sendSingleEmail: (payload) =>
     request('/api/send-email', { method: 'POST', body: JSON.stringify(payload) }),
-
-  testSmtp: (smtpConfig) =>
-    request('/api/test-smtp', { method: 'POST', body: JSON.stringify({ smtpConfig }) }),
-
-  createEthereal: () => request('/api/ethereal', { method: 'POST' }),
 };

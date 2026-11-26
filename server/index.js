@@ -28,6 +28,12 @@ import sendEmailHandler from '../api/send-email.js';
 import testSmtpHandler from '../api/test-smtp.js';
 import etherealHandler from '../api/ethereal.js';
 import mailStatusHandler from '../api/mail-status.js';
+import templatesHandler from '../api/templates.js';
+import sheetHandler from '../api/sheet.js';
+import campaignsHandler from '../api/campaigns.js';
+import adminDocsHandler from '../api/admin-docs.js';
+import assetHandler from '../api/asset.js';
+import { getDb, isMongoConfigured } from '../api/_db.js';
 
 dotenv.config();
 
@@ -39,14 +45,36 @@ const PORT = Number(process.env.PORT) || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
 app.use('/uploads', express.static(UPLOADS_DIR));
+app.get('/api/asset', assetHandler);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
+  res.json({ ok: true, mongo: isMongoConfigured(), timestamp: new Date().toISOString() });
 });
 
+// MongoDB Atlas-backed endpoints (shared with Vercel serverless api/)
+app.use('/api/templates/:id', (req, res, next) => {
+  if (!isMongoConfigured()) return next();
+  return templatesHandler(req, res);
+});
+app.use('/api/templates', (req, res, next) => {
+  if (!isMongoConfigured()) return next();
+  return templatesHandler(req, res);
+});
+app.use('/api/sheet', (req, res, next) => {
+  if (!isMongoConfigured()) return next();
+  return sheetHandler(req, res);
+});
+app.use('/api/campaigns', (req, res, next) => {
+  if (!isMongoConfigured()) return next();
+  if (req.path === '/' || req.path === '') return campaignsHandler(req, res);
+  return next();
+});
+app.all('/api/admin-docs', adminDocsHandler);
+
 // ---------------- Image Upload (saves file & returns persistent URL) ----------------
-app.post('/api/upload', (req, res) => {
+app.post('/api/upload', async (req, res) => {
   const { filename = 'image.png', dataUrl } = req.body || {};
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
     return res.status(400).json({ error: 'Invalid image payload' });
@@ -57,6 +85,7 @@ app.post('/api/upload', (req, res) => {
   }
 
   const mime = match[1];
+  const base64Content = match[2];
   const extFromMime = {
     'image/png': '.png',
     'image/jpeg': '.jpg',
@@ -74,9 +103,37 @@ app.post('/api/upload', (req, res) => {
 
   const ext = extFromMime || path.extname(filename).toLowerCase() || '.png';
   const savedFilename = `${rawBase}-${Date.now()}${ext}`;
-  const targetPath = path.join(UPLOADS_DIR, savedFilename);
+  const fileBuffer = Buffer.from(base64Content, 'base64');
+  fs.writeFileSync(path.join(UPLOADS_DIR, savedFilename), fileBuffer);
 
-  fs.writeFileSync(targetPath, Buffer.from(match[2], 'base64'));
+  // Save into public/uploads so uploaded assets are git-tracked & deployed on git push
+  const publicUploadsDir = path.join(__dirname, '..', 'public', 'uploads');
+  if (!fs.existsSync(publicUploadsDir)) {
+    fs.mkdirSync(publicUploadsDir, { recursive: true });
+  }
+  fs.writeFileSync(path.join(publicUploadsDir, savedFilename), fileBuffer);
+
+  // Also cache in MongoDB assets collection if configured
+  if (isMongoConfigured()) {
+    try {
+      const db = await getDb();
+      await db.collection('assets').updateOne(
+        { name: savedFilename },
+        {
+          $set: {
+            name: savedFilename,
+            mime,
+            dataBase64: base64Content,
+            size: fileBuffer.length,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+        { upsert: true }
+      );
+    } catch {
+      // Non-fatal
+    }
+  }
 
   const relativeUrl = `/uploads/${savedFilename}`;
   const fullUrl = `${req.protocol}://${req.get('host')}${relativeUrl}`;
@@ -85,6 +142,7 @@ app.post('/api/upload', (req, res) => {
     filename: savedFilename,
     url: relativeUrl,
     fullUrl,
+    localSaved: true,
   });
 });
 

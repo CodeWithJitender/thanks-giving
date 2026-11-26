@@ -194,8 +194,14 @@ export default function TemplatesTab({
     try {
       const dataUrl = await fileToDataUrl(file);
       const uploaded = await api.uploadImage(file.name, dataUrl);
-      updateField(field, uploaded.inline ? uploaded.url : uploaded.fullUrl || uploaded.url);
-      notify(`Loaded "${file.name}" — click Save Template to keep changes.`, 'success');
+      updateField(field, uploaded.url);
+      if (uploaded.githubCommitted) {
+        notify(`Uploaded "${file.name}" & committed to GitHub public/uploads/ (run git pull locally to fetch).`, 'success');
+      } else if (uploaded.localSaved) {
+        notify(`Saved "${file.name}" to public/uploads/ (ready for git push) — click Save Template.`, 'success');
+      } else {
+        notify(`Loaded "${file.name}" — click Save Template to keep changes.`, 'success');
+      }
     } catch (err) {
       notify(err.message, 'error');
     } finally {

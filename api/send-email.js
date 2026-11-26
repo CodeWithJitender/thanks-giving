@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import nodemailer from 'nodemailer';
+import { getDb, isMongoConfigured } from './_db.js';
 
 function escapeHtml(str = '') {
   return String(str)
@@ -64,7 +65,7 @@ function findLocalUpload(safeName) {
   return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
-function resolveImageForEmail(imageUrl, cid, baseName) {
+async function resolveImageForEmail(imageUrl, cid, baseName) {
   if (!imageUrl || typeof imageUrl !== 'string') {
     return { src: '', attachment: null };
   }
@@ -88,11 +89,16 @@ function resolveImageForEmail(imageUrl, cid, baseName) {
     };
   }
 
-  const localMatch = trimmed.match(
-    /(?:https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)?(\/uploads\/[^?#]+)/i
-  );
-  if (localMatch) {
-    const safeName = path.basename(localMatch[1].replace(/^\/uploads\//, ''));
+  let safeName = '';
+  const uploadsMatch = trimmed.match(/(?:https?:\/\/[^/]+)?\/uploads\/([^?#]+)/i);
+  const assetMatch = trimmed.match(/(?:https?:\/\/[^/]+)?\/api\/asset\?name=([^&#]+)/i);
+  if (uploadsMatch) {
+    safeName = path.basename(decodeURIComponent(uploadsMatch[1]));
+  } else if (assetMatch) {
+    safeName = path.basename(decodeURIComponent(assetMatch[1]));
+  }
+
+  if (safeName) {
     const fullPath = findLocalUpload(safeName);
     if (fullPath) {
       const ext = path.extname(safeName).toLowerCase();
@@ -107,12 +113,33 @@ function resolveImageForEmail(imageUrl, cid, baseName) {
         },
       };
     }
+
+    if (isMongoConfigured()) {
+      try {
+        const db = await getDb();
+        const doc = await db.collection('assets').findOne({ name: safeName });
+        if (doc?.dataBase64) {
+          return {
+            src: `cid:${cid}`,
+            attachment: {
+              filename: safeName,
+              content: Buffer.from(doc.dataBase64, 'base64'),
+              contentType: doc.mime || 'image/png',
+              cid,
+              contentDisposition: 'inline',
+            },
+          };
+        }
+      } catch {
+        // Fallback to URL
+      }
+    }
   }
 
   return { src: trimmed, attachment: null };
 }
 
-function buildEmail({ template, client }) {
+async function buildEmail({ template, client }) {
   const renderedSubject = interpolate(
     template.subject || 'Happy Thanksgiving from {{department}}',
     client,
@@ -127,10 +154,10 @@ function buildEmail({ template, client }) {
     .filter(Boolean);
 
   const attachments = [];
-  const resolvedLogo = resolveImageForEmail(template.logoUrl, 'company-logo', 'logo');
+  const resolvedLogo = await resolveImageForEmail(template.logoUrl, 'company-logo', 'logo');
   if (resolvedLogo.attachment) attachments.push(resolvedLogo.attachment);
 
-  const resolvedPoster = resolveImageForEmail(
+  const resolvedPoster = await resolveImageForEmail(
     template.posterUrl,
     'thanksgiving-poster',
     'poster'
@@ -220,7 +247,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const { subject, html, text, attachments } = buildEmail({ template, client });
+  const { subject, html, text, attachments } = await buildEmail({ template, client });
   const fromEmail = cfg.fromEmail || cfg.user;
 
   if (hasResend && !cfg.user) {

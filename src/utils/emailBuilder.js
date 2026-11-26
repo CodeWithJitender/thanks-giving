@@ -22,8 +22,15 @@ export function interpolate(text = '', client = {}, template = {}) {
     .replace(/\{\{\s*email\s*\}\}/gi, email);
 }
 
+function normalizeAssetUrl(url = '') {
+  return String(url || '').replace(/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/uploads\/)/i, '$1');
+}
+
 export function buildPreviewEmail({ template, client }) {
   if (!template) return { subject: '', html: '' };
+
+  const logoUrl = normalizeAssetUrl(template.logoUrl);
+  const posterUrl = normalizeAssetUrl(template.posterUrl);
 
   const renderedSubject = interpolate(
     template.subject || 'Happy Thanksgiving from {{department}}',
@@ -42,10 +49,10 @@ export function buildPreviewEmail({ template, client }) {
   const rawBg = String(template.logoBgColor || '#ffffff').trim();
   const logoBg = /^#[0-9a-f]{3,8}$/i.test(rawBg) ? rawBg : '#ffffff';
 
-  const logoBlock = template.logoUrl
+  const logoBlock = logoUrl
     ? `<tr>
         <td align="center" bgcolor="${logoBg}" style="padding: 26px 36px 20px 36px; background-color: ${logoBg}; background-image: linear-gradient(${logoBg}, ${logoBg});">
-          <img src="${escapeHtml(template.logoUrl)}" alt="${escapeHtml(template.department || 'Logo')}" width="${logoWidth}" style="display: block; max-width: 100%; width: ${logoWidth}px; height: auto; border: 0;" />
+          <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(template.department || 'Logo')}" width="${logoWidth}" style="display: block; max-width: 100%; width: ${logoWidth}px; height: auto; border: 0;" />
         </td>
       </tr>`
     : '';
@@ -59,10 +66,10 @@ export function buildPreviewEmail({ template, client }) {
     )
     .join('\n');
 
-  const posterBlock = template.posterUrl
+  const posterBlock = posterUrl
     ? `<tr>
         <td align="center" bgcolor="#ffffff" style="padding: 8px 32px 32px 32px; background-color: #ffffff; background-image: linear-gradient(#ffffff, #ffffff);">
-          <img src="${escapeHtml(template.posterUrl)}" alt="Happy Thanksgiving" width="536" style="display: block; width: 100%; max-width: 536px; height: auto; border: 0; border-radius: 4px;" />
+          <img src="${escapeHtml(posterUrl)}" alt="Happy Thanksgiving" width="536" style="display: block; width: 100%; max-width: 536px; height: auto; border: 0; border-radius: 4px;" />
         </td>
       </tr>`
     : '';
