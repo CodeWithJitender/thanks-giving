@@ -43,6 +43,7 @@ export default function SpreadsheetTab({
   const [page, setPage] = useState(1);
   const [previewData, setPreviewData] = useState(null);
   const [sending, setSending] = useState(false);
+  const [templateOfTheDayId, setTemplateOfTheDayId] = useState('auto');
 
   // Per-send / per-mail optional subject & description customization
   const [showCustomMail, setShowCustomMail] = useState(false);
@@ -83,7 +84,16 @@ export default function SpreadsheetTab({
     [templates]
   );
 
+  const selectedDayTemplate = useMemo(
+    () =>
+      templateOfTheDayId === 'auto'
+        ? null
+        : templates.find((t) => t.id === templateOfTheDayId) || null,
+    [templates, templateOfTheDayId]
+  );
+
   const resolveTemplate = (dept) => {
+    if (selectedDayTemplate) return selectedDayTemplate;
     const key = (dept || '').trim().toLowerCase();
     return templateMap.get(key) || defaultTemplate;
   };
@@ -225,6 +235,7 @@ export default function SpreadsheetTab({
           bodyOverride: rowOverrides[r.id]?.body || '',
         })),
         useDefaultFallback: true,
+        selectedTemplateId: templateOfTheDayId,
         subjectOverride: subjectOverride.trim(),
         bodyOverride: bodyOverride.trim(),
         campaignName: `${fileName || 'Clients'} (${selectedRecipients.length})`,
@@ -421,6 +432,70 @@ export default function SpreadsheetTab({
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Template of the Day Selector */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Select Template of the Day</h3>
+                <p className="text-xs text-slate-500">
+                  Pick one template to send to everyone today, or auto-match each client's department.
+                </p>
+              </div>
+              {selectedDayTemplate && (
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                  Selected: {selectedDayTemplate.department}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              <button
+                type="button"
+                onClick={() => setTemplateOfTheDayId('auto')}
+                className={`flex flex-col justify-between rounded-lg border p-3 text-left transition ${
+                  templateOfTheDayId === 'auto'
+                    ? 'border-amber-600 bg-amber-50 ring-1 ring-amber-600'
+                    : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                }`}
+              >
+                <div className="text-xs font-semibold text-slate-900">Auto-Match by Department</div>
+                <div className="mt-1 text-[11px] text-slate-600">
+                  Uses each client's Department column automatically.
+                </div>
+              </button>
+
+              {templates.map((tpl) => {
+                const isPicked = templateOfTheDayId === tpl.id;
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => setTemplateOfTheDayId(tpl.id)}
+                    className={`flex items-center gap-3 rounded-lg border p-2.5 text-left transition ${
+                      isPicked
+                        ? 'border-amber-600 bg-amber-50 ring-1 ring-amber-600'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    {tpl.posterUrl && (
+                      <img
+                        src={tpl.posterUrl}
+                        alt={tpl.department}
+                        className="h-12 w-12 shrink-0 rounded border border-slate-200 object-cover"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-semibold text-slate-900">
+                        {tpl.department}
+                      </div>
+                      <div className="truncate text-[11px] text-slate-500">{tpl.subject}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Optional Batch Subject / Description Override */}

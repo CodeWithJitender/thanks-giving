@@ -74,6 +74,7 @@ export function cancelJob(id) {
 export async function startCampaign({
   recipients,
   useDefaultFallback = true,
+  selectedTemplateId = 'auto',
   campaignName,
   subjectOverride = '',
   bodyOverride = '',
@@ -116,6 +117,7 @@ export async function startCampaign({
     templates,
     smtpConfig,
     useDefaultFallback,
+    selectedTemplateId,
     subjectOverride,
     bodyOverride
   ).catch((err) => {
@@ -153,6 +155,7 @@ async function runQueue(
   templates,
   smtpConfig,
   useDefaultFallback,
+  selectedTemplateId,
   subjectOverride,
   bodyOverride
 ) {
@@ -164,6 +167,10 @@ async function runQueue(
   }
 
   const delayMs = Number(smtpConfig.delayMs) || 100;
+  const fixedTemplate =
+    selectedTemplateId && selectedTemplateId !== 'auto'
+      ? templates.find((t) => t.id === selectedTemplateId) || null
+      : null;
 
   for (let i = 0; i < recipients.length; i++) {
     if (job.cancelled) break;
@@ -171,14 +178,16 @@ async function runQueue(
     const client = recipients[i];
     const resultRow = job.results[i];
 
-    const matchedTemplate = (() => {
-      const normalized = (client.department || '').trim().toLowerCase();
-      const exact = templates.find(
-        (t) => (t.department || '').trim().toLowerCase() === normalized
-      );
-      if (exact) return exact;
-      return useDefaultFallback ? templates.find((t) => t.isDefault) || templates[0] : null;
-    })();
+    const matchedTemplate =
+      fixedTemplate ||
+      (() => {
+        const normalized = (client.department || '').trim().toLowerCase();
+        const exact = templates.find(
+          (t) => (t.department || '').trim().toLowerCase() === normalized
+        );
+        if (exact) return exact;
+        return useDefaultFallback ? templates.find((t) => t.isDefault) || templates[0] : null;
+      })();
 
     if (!matchedTemplate) {
       resultRow.status = 'skipped';

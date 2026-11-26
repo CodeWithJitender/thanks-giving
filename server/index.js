@@ -333,6 +333,7 @@ app.post('/api/campaigns/send', async (req, res) => {
   const {
     recipients,
     useDefaultFallback = true,
+    selectedTemplateId = 'auto',
     campaignName,
     subjectOverride = '',
     bodyOverride = '',
@@ -345,6 +346,7 @@ app.post('/api/campaigns/send', async (req, res) => {
   const job = await startCampaign({
     recipients,
     useDefaultFallback,
+    selectedTemplateId,
     campaignName,
     subjectOverride,
     bodyOverride,
