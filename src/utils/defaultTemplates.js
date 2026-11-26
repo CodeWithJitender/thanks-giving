@@ -1,3 +1,5 @@
+import { formatClientName } from './spreadsheet';
+
 const TEMPLATES_KEY = 'tg_templates_v3';
 const SHEET_KEY = 'tg_sheet_v1';
 const CAMPAIGNS_KEY = 'tg_campaigns_v1';
@@ -130,6 +132,7 @@ export function loadStoredSheetState() {
         return {
           ...EMPTY_SHEET_STATE,
           ...parsed,
+          rows: parsed.rows.map((r) => ({ ...r, name: formatClientName(r.name) })),
           selectedIds: new Set(Array.isArray(parsed.selectedIds) ? parsed.selectedIds : []),
         };
       }

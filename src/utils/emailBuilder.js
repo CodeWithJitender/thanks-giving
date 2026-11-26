@@ -1,3 +1,5 @@
+import { formatClientName } from './spreadsheet';
+
 export function escapeHtml(str = '') {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -8,7 +10,7 @@ export function escapeHtml(str = '') {
 }
 
 export function interpolate(text = '', client = {}, template = {}) {
-  const name = (client.name || 'Valued Client').trim();
+  const name = formatClientName(client.name || 'Valued Client');
   const department = (client.department || template.department || '').trim();
   const email = (client.email || '').trim();
 

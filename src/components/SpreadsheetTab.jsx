@@ -198,17 +198,14 @@ export default function SpreadsheetTab({
     setModalTemplateId(matched?.id || '');
     setModalSubject(matched?.subject || '');
     setModalBody(matched?.body || '');
-    setModalFromName(matched?.department || 'Head Field');
-    setModalFromEmail('greetings@headfield.com');
+    setModalFromName(matched?.fromName || matched?.department || 'Head Field');
+    setModalFromEmail(matched?.fromEmail || '');
     setPreviewClientId(selectedRecipients[0]?.id || '');
     setSendModalOpen(true);
 
     try {
       const status = await api.getMailStatus();
       setMailStatus(status);
-      if (status?.defaultFromEmail) {
-        setModalFromEmail(status.defaultFromEmail);
-      }
     } catch {
       setMailStatus({ configured: false });
     }
@@ -220,7 +217,8 @@ export default function SpreadsheetTab({
     if (tpl) {
       setModalSubject(tpl.subject || '');
       setModalBody(tpl.body || '');
-      setModalFromName(tpl.department || 'Head Field');
+      setModalFromName(tpl.fromName || tpl.department || 'Head Field');
+      setModalFromEmail(tpl.fromEmail || '');
     }
   };
 
@@ -330,7 +328,7 @@ export default function SpreadsheetTab({
       modalEffectiveTemplate,
       {
         fromName: modalFromName.trim() || modalEffectiveTemplate.department || 'Head Field',
-        fromEmail: modalFromEmail.trim() || 'greetings@headfield.com',
+        fromEmail: modalFromEmail.trim(),
       },
       `${modalEffectiveTemplate.department} (${selectedRecipients.length} clients)`
     );
@@ -870,11 +868,14 @@ export default function SpreadsheetTab({
                       type="email"
                       value={modalFromEmail}
                       onChange={(e) => setModalFromEmail(e.target.value)}
-                      placeholder="sender@company.com"
+                      placeholder="Optional LOB sender email"
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                     />
                   </div>
                 </div>
+                <p className="-mt-2 text-[11px] text-slate-500">
+                  Leave Sender Email blank to use default, or enter an LOB email (note: Gmail only displays custom From emails if verified as a &ldquo;Send mail as&rdquo; alias).
+                </p>
 
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-700">
@@ -958,7 +959,7 @@ export default function SpreadsheetTab({
                   template={modalEffectiveTemplate}
                   client={previewClient}
                   fromName={modalFromName || 'Head Field'}
-                  fromEmail={modalFromEmail || 'greetings@headfield.com'}
+                  fromEmail={modalFromEmail}
                   title="Preview (As Client Will See It)"
                 />
               </div>

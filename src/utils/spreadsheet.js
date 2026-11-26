@@ -2,6 +2,28 @@ import * as XLSX from 'xlsx';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
+export function formatClientName(raw = '') {
+  const cleaned = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return '';
+  return cleaned
+    .split(' ')
+    .map((word) =>
+      word
+        .split(/([-'])/)
+        .map((part) => {
+          if (part === '-' || part === "'" || !part) return part;
+          const isAllLower = part === part.toLowerCase();
+          const isAllUpper = part === part.toUpperCase();
+          if (isAllLower || isAllUpper) {
+            return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+          }
+          return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        .join('')
+    )
+    .join(' ');
+}
+
 export function isValidEmail(email) {
   return EMAIL_REGEX.test(String(email || '').trim());
 }
@@ -56,7 +78,7 @@ export function normalizeRows(rawRows, mapping) {
   const seenEmails = new Set();
 
   return rawRows.map((row, idx) => {
-    const name = String(row[mapping.nameCol] ?? '').trim();
+    const name = formatClientName(row[mapping.nameCol] ?? '');
     const email = String(row[mapping.emailCol] ?? '').trim();
     const department = String(row[mapping.deptCol] ?? '').trim();
 

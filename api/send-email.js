@@ -11,8 +11,30 @@ function escapeHtml(str = '') {
     .replace(/'/g, '&#39;');
 }
 
+function formatClientName(raw = '') {
+  const cleaned = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return '';
+  return cleaned
+    .split(' ')
+    .map((word) =>
+      word
+        .split(/([-'])/)
+        .map((part) => {
+          if (part === '-' || part === "'" || !part) return part;
+          const isAllLower = part === part.toLowerCase();
+          const isAllUpper = part === part.toUpperCase();
+          if (isAllLower || isAllUpper) {
+            return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+          }
+          return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        .join('')
+    )
+    .join(' ');
+}
+
 function interpolate(text = '', client = {}, template = {}) {
-  const name = (client.name || 'Valued Client').trim();
+  const name = formatClientName(client.name || 'Valued Client');
   const department = (client.department || template.department || '').trim();
   const email = (client.email || '').trim();
 
@@ -236,7 +258,9 @@ export default async function handler(req, res) {
     const info = await transporter.sendMail({
       from: `"${String(cfg.fromName).replace(/"/g, '')}" <${fromEmail}>`,
       to: client.name ? `"${String(client.name).replace(/"/g, '')}" <${client.email}>` : client.email,
-      replyTo: cfg.replyTo || undefined,
+      replyTo:
+        cfg.replyTo ||
+        (smtpConfig.fromEmail && smtpConfig.fromEmail !== cfg.user ? smtpConfig.fromEmail : undefined),
       subject: isTest ? `[TEST] ${subject}` : subject,
       text,
       html,

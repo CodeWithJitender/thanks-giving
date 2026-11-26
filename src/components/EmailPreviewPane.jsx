@@ -70,7 +70,7 @@ export default function EmailPreviewPane({
       <div className="space-y-1 border-b border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600">
         <div className="truncate">
           <span className="font-semibold text-slate-700">From:</span>{' '}
-          {fromName} &lt;{fromEmail}&gt;
+          {fromEmail ? `${fromName} <${fromEmail}>` : fromName}
         </div>
         <div className="truncate">
           <span className="font-semibold text-slate-700">To:</span>{' '}

@@ -289,7 +289,11 @@ export default function TemplatesTab({
 
           <button
             type="button"
-            onClick={onResetDefaults}
+            onClick={() => {
+              if (window.confirm('Restore all 13 default templates? This will overwrite any custom logos you uploaded.')) {
+                onResetDefaults();
+              }
+            }}
             className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="h-3 w-3" />
@@ -357,6 +361,33 @@ export default function TemplatesTab({
                   />
                   Default fallback template
                 </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-700">
+                  Sender Display Name (for this LOB)
+                </label>
+                <input
+                  type="text"
+                  value={draft.fromName || ''}
+                  onChange={(e) => updateField('fromName', e.target.value)}
+                  placeholder={draft.department || 'Head Field'}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-700">
+                  Sender Email ID (for this LOB)
+                </label>
+                <input
+                  type="email"
+                  value={draft.fromEmail || ''}
+                  onChange={(e) => updateField('fromEmail', e.target.value)}
+                  placeholder="Optional custom sender email"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                />
               </div>
             </div>
 
@@ -436,8 +467,8 @@ export default function TemplatesTab({
             email: 'client@example.com',
             department: draft?.department || 'Head Field',
           }}
-          fromName={draft?.department || 'Head Field'}
-          fromEmail="greetings@headfield.com"
+          fromName={draft?.fromName || draft?.department || 'Head Field'}
+          fromEmail={draft?.fromEmail || ''}
           title={`Preview: ${draft?.department || 'Template'}`}
         />
       </div>
