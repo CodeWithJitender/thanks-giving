@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Save, Trash2, Upload, Link2, CheckCircle2, ExternalLink } from 'lucide-react';
+import {
+  Plus,
+  Save,
+  Trash2,
+  Upload,
+  Link2,
+  CheckCircle2,
+  ExternalLink,
+  RotateCcw,
+} from 'lucide-react';
 import { api } from '../api';
 import EmailPreviewPane from './EmailPreviewPane';
 
@@ -13,8 +22,11 @@ function fileToDataUrl(file) {
 }
 
 function ImageField({ label, value, onChange, onUpload, uploading, previewHeight = 'h-12' }) {
+  const isDataUrl = Boolean(value && value.startsWith('data:'));
   const fullDisplayUrl =
-    value && value.startsWith('/') ? `${window.location.origin}${value}` : value || '';
+    !isDataUrl && value && value.startsWith('/')
+      ? `${window.location.origin}${value}`
+      : value || '';
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
@@ -39,12 +51,12 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
           <input
             type="text"
             placeholder="Paste image link (https://...) or upload above"
-            value={value || ''}
+            value={isDataUrl ? '' : value || ''}
             onChange={(e) => onChange(e.target.value)}
             className="w-full rounded-md border border-slate-300 bg-white py-1.5 pr-3 pl-8 text-xs text-slate-800 focus:border-amber-500 focus:outline-none"
           />
         </div>
-        {fullDisplayUrl && (
+        {!isDataUrl && fullDisplayUrl && (
           <a
             href={fullDisplayUrl}
             target="_blank"
@@ -64,8 +76,16 @@ function ImageField({ label, value, onChange, onUpload, uploading, previewHeight
             alt={label}
             className={`${previewHeight} max-w-[180px] rounded border border-slate-200 bg-white object-contain p-1`}
           />
-          <div className="min-w-0 flex-1 text-[11px] text-slate-500 truncate">
-            Saved link: <span className="font-mono text-slate-700">{fullDisplayUrl}</span>
+          <div className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
+            {isDataUrl ? (
+              <span className="font-medium text-emerald-700">
+                Uploaded image saved in browser (will be embedded inline in emails)
+              </span>
+            ) : (
+              <>
+                Saved link: <span className="font-mono text-slate-700">{fullDisplayUrl}</span>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -80,6 +100,7 @@ export default function TemplatesTab({
   onCreate,
   onUpdate,
   onDelete,
+  onResetDefaults,
   notify,
 }) {
   const activeTemplate = templates.find((t) => t.id === selectedId) || templates[0] || null;
@@ -108,8 +129,8 @@ export default function TemplatesTab({
     try {
       const dataUrl = await fileToDataUrl(file);
       const uploaded = await api.uploadImage(file.name, dataUrl);
-      updateField(field, uploaded.fullUrl || uploaded.url);
-      notify(`Uploaded "${file.name}" — saved link added! Click Save Template to keep changes.`, 'success');
+      updateField(field, uploaded.inline ? uploaded.url : uploaded.fullUrl || uploaded.url);
+      notify(`Loaded "${file.name}" — click Save Template to keep changes.`, 'success');
     } catch (err) {
       notify(err.message, 'error');
     } finally {
@@ -237,6 +258,15 @@ export default function TemplatesTab({
               );
             })}
           </div>
+
+          <button
+            type="button"
+            onClick={onResetDefaults}
+            className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Reset 3 Dummy Templates
+          </button>
         </div>
       </div>
 
@@ -285,7 +315,7 @@ export default function TemplatesTab({
                 />
               </div>
               <div className="flex items-end pb-2">
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
                   <input
                     type="checkbox"
                     checked={Boolean(draft.isDefault)}

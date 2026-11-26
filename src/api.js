@@ -8,7 +8,13 @@ async function request(url, options = {}) {
       ...(options.headers || {}),
     },
   });
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Unexpected response from ${url}`);
+  }
   if (!res.ok) {
     throw new Error(data.error || data.message || `Request failed (${res.status})`);
   }
@@ -16,31 +22,30 @@ async function request(url, options = {}) {
 }
 
 export const api = {
-  uploadImage: (filename, dataUrl) =>
-    request('/api/upload', { method: 'POST', body: JSON.stringify({ filename, dataUrl }) }),
+  // Tries local server upload first; falls back cleanly to inline dataUrl on static/serverless hosts like Vercel
+  uploadImage: async (filename, dataUrl) => {
+    try {
+      const res = await request('/api/upload', {
+        method: 'POST',
+        body: JSON.stringify({ filename, dataUrl }),
+      });
+      if (res?.url) return res;
+    } catch {
+      // Vercel / static deployment fallback
+    }
+    return {
+      filename,
+      url: dataUrl,
+      fullUrl: dataUrl,
+      inline: true,
+    };
+  },
 
-  getTemplates: () => request('/api/templates'),
-  createTemplate: (payload) =>
-    request('/api/templates', { method: 'POST', body: JSON.stringify(payload) }),
-  updateTemplate: (id, payload) =>
-    request(`/api/templates/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-  deleteTemplate: (id) => request(`/api/templates/${id}`, { method: 'DELETE' }),
+  sendSingleEmail: (payload) =>
+    request('/api/send-email', { method: 'POST', body: JSON.stringify(payload) }),
 
-  previewEmail: (payload) =>
-    request('/api/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  testSmtp: (smtpConfig) =>
+    request('/api/test-smtp', { method: 'POST', body: JSON.stringify({ smtpConfig }) }),
 
-  getSmtp: () => request('/api/smtp'),
-  saveSmtp: (payload) =>
-    request('/api/smtp', { method: 'POST', body: JSON.stringify(payload) }),
-  testSmtp: () => request('/api/smtp/test', { method: 'POST' }),
-  createEthereal: () => request('/api/smtp/ethereal', { method: 'POST' }),
-  sendTestEmail: (payload) =>
-    request('/api/smtp/send-test', { method: 'POST', body: JSON.stringify(payload) }),
-
-  getCampaigns: () => request('/api/campaigns'),
-  getCampaign: (id) => request(`/api/campaigns/${id}`),
-  startCampaign: (payload) =>
-    request('/api/campaigns/send', { method: 'POST', body: JSON.stringify(payload) }),
-  cancelCampaign: (id) => request(`/api/campaigns/${id}/cancel`, { method: 'POST' }),
-  retryCampaign: (id) => request(`/api/campaigns/${id}/retry`, { method: 'POST' }),
+  createEthereal: () => request('/api/ethereal', { method: 'POST' }),
 };

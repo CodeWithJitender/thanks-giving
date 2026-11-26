@@ -24,6 +24,9 @@ import {
   retryFailedCampaign,
   startCampaign,
 } from './campaignRunner.js';
+import sendEmailHandler from '../api/send-email.js';
+import testSmtpHandler from '../api/test-smtp.js';
+import etherealHandler from '../api/ethereal.js';
 
 dotenv.config();
 
@@ -365,6 +368,10 @@ app.post('/api/campaigns/:id/retry', async (req, res) => {
   if (!job) return res.status(400).json({ error: 'No failed/skipped recipients to retry' });
   res.status(202).json({ campaign: job });
 });
+
+app.post('/api/send-email', sendEmailHandler);
+app.post('/api/test-smtp', testSmtpHandler);
+app.post('/api/ethereal', etherealHandler);
 
 // Serve built React app in production
 const distDir = path.join(__dirname, '..', 'dist');

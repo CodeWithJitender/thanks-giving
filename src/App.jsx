@@ -8,7 +8,13 @@ import {
   AlertCircle,
   Info,
 } from 'lucide-react';
-import { api } from './api';
+import {
+  DEFAULT_TEMPLATES,
+  loadStoredSmtp,
+  loadStoredTemplates,
+  saveStoredSmtp,
+  saveStoredTemplates,
+} from './utils/defaultTemplates';
 import TemplatesTab from './components/TemplatesTab';
 import SpreadsheetTab from './components/SpreadsheetTab';
 import SmtpSettingsTab from './components/SmtpSettingsTab';
@@ -21,11 +27,12 @@ const TABS = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('templates');
-  const [templates, setTemplates] = useState([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
-  const [smtpConfig, setSmtpConfig] = useState(null);
+  const [templates, setTemplates] = useState(() => loadStoredTemplates());
+  const [selectedTemplateId, setSelectedTemplateId] = useState(
+    () => loadStoredTemplates()[0]?.id || null
+  );
+  const [smtpConfig, setSmtpConfig] = useState(() => loadStoredSmtp());
   const [activeCampaign, setActiveCampaign] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
   const [sheetState, setSheetState] = useState({
@@ -47,50 +54,67 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const loadInitial = useCallback(async () => {
-    try {
-      const [tplRes, smtpRes, cmpRes] = await Promise.all([
-        api.getTemplates(),
-        api.getSmtp(),
-        api.getCampaigns(),
-      ]);
-      setTemplates(tplRes.templates || []);
-      if (tplRes.templates?.length > 0) {
-        setSelectedTemplateId((prev) => prev || tplRes.templates[0].id);
-      }
-      setSmtpConfig(smtpRes.config);
-      if (cmpRes.campaigns?.length > 0) {
-        setActiveCampaign(cmpRes.campaigns[0]);
-      }
-    } catch (err) {
-      notify(`Failed to load: ${err.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [notify]);
-
-  useEffect(() => {
-    loadInitial();
-  }, [loadInitial]);
-
   const handleCreateTemplate = async (payload) => {
-    const res = await api.createTemplate(payload);
-    setTemplates(res.templates);
-    return res.template;
+    const dept = (payload.department || 'New Department').trim();
+    const base = templates[0] || DEFAULT_TEMPLATES[0];
+    const newTemplate = {
+      id: `dept-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      department: dept,
+      isDefault: Boolean(payload.isDefault),
+      subject: payload.subject || `Happy Thanksgiving, {{name}} — From ${dept}`,
+      greeting: payload.greeting || 'Dear {{name}},',
+      body:
+        payload.body ||
+        `As Thanksgiving approaches, we want to take a moment to express our sincere gratitude for the trust you place in our ${dept} team.\n\nWe wish you and your loved ones a happy Thanksgiving filled with warmth, joy, and time spent with family and friends.`,
+      logoUrl: payload.logoUrl || base.logoUrl,
+      logoWidth: Number(payload.logoWidth) || 210,
+      posterUrl: payload.posterUrl || base.posterUrl,
+      updatedAt: new Date().toISOString(),
+    };
+
+    let next = [...templates];
+    if (newTemplate.isDefault) {
+      next = next.map((t) => ({ ...t, isDefault: false }));
+    }
+    next.push(newTemplate);
+    saveStoredTemplates(next);
+    setTemplates(next);
+    return newTemplate;
   };
 
   const handleUpdateTemplate = async (id, payload) => {
-    const res = await api.updateTemplate(id, payload);
-    setTemplates(res.templates);
-    return res.template;
+    let next = [...templates];
+    if (payload.isDefault) {
+      next = next.map((t) => ({ ...t, isDefault: false }));
+    }
+    next = next.map((t) =>
+      t.id === id ? { ...t, ...payload, id, updatedAt: new Date().toISOString() } : t
+    );
+    saveStoredTemplates(next);
+    setTemplates(next);
+    return next.find((t) => t.id === id);
   };
 
   const handleDeleteTemplate = async (id) => {
-    const res = await api.deleteTemplate(id);
-    setTemplates(res.templates);
-    if (selectedTemplateId === id && res.templates.length > 0) {
-      setSelectedTemplateId(res.templates[0].id);
+    if (templates.length <= 1) {
+      throw new Error('Cannot delete the last remaining template');
     }
+    let next = templates.filter((t) => t.id !== id);
+    if (!next.some((t) => t.isDefault) && next.length > 0) {
+      next[0] = { ...next[0], isDefault: true };
+    }
+    saveStoredTemplates(next);
+    setTemplates(next);
+    if (selectedTemplateId === id && next.length > 0) {
+      setSelectedTemplateId(next[0].id);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    saveStoredTemplates(DEFAULT_TEMPLATES);
+    setTemplates(DEFAULT_TEMPLATES);
+    setSelectedTemplateId(DEFAULT_TEMPLATES[0].id);
+    notify('Restored the 3 default Thanksgiving templates', 'success');
   };
 
   const handleCreateMissingTemplate = async (departmentName) => {
@@ -105,9 +129,9 @@ export default function App() {
   };
 
   const handleSaveSmtp = async (payload) => {
-    const res = await api.saveSmtp(payload);
-    setSmtpConfig(res.config);
-    return res.config;
+    const saved = saveStoredSmtp(payload);
+    setSmtpConfig(saved);
+    return saved;
   };
 
   return (
@@ -165,46 +189,39 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-        {loading ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-500">
-            Loading...
-          </div>
-        ) : (
-          <>
-            {activeTab === 'templates' && (
-              <TemplatesTab
-                templates={templates}
-                selectedId={selectedTemplateId}
-                onSelectId={setSelectedTemplateId}
-                onCreate={handleCreateTemplate}
-                onUpdate={handleUpdateTemplate}
-                onDelete={handleDeleteTemplate}
-                notify={notify}
-              />
-            )}
+        {activeTab === 'templates' && (
+          <TemplatesTab
+            templates={templates}
+            selectedId={selectedTemplateId}
+            onSelectId={setSelectedTemplateId}
+            onCreate={handleCreateTemplate}
+            onUpdate={handleUpdateTemplate}
+            onDelete={handleDeleteTemplate}
+            onResetDefaults={handleResetDefaults}
+            notify={notify}
+          />
+        )}
 
-            {activeTab === 'spreadsheet' && (
-              <SpreadsheetTab
-                templates={templates}
-                smtpConfig={smtpConfig}
-                sheetState={sheetState}
-                setSheetState={setSheetState}
-                activeCampaign={activeCampaign}
-                setActiveCampaign={setActiveCampaign}
-                onCreateMissingTemplate={handleCreateMissingTemplate}
-                notify={notify}
-              />
-            )}
+        {activeTab === 'spreadsheet' && (
+          <SpreadsheetTab
+            templates={templates}
+            smtpConfig={smtpConfig}
+            sheetState={sheetState}
+            setSheetState={setSheetState}
+            activeCampaign={activeCampaign}
+            setActiveCampaign={setActiveCampaign}
+            onCreateMissingTemplate={handleCreateMissingTemplate}
+            notify={notify}
+          />
+        )}
 
-            {activeTab === 'smtp' && (
-              <SmtpSettingsTab
-                smtpConfig={smtpConfig}
-                onSaveSmtp={handleSaveSmtp}
-                templates={templates}
-                notify={notify}
-              />
-            )}
-          </>
+        {activeTab === 'smtp' && (
+          <SmtpSettingsTab
+            smtpConfig={smtpConfig}
+            onSaveSmtp={handleSaveSmtp}
+            templates={templates}
+            notify={notify}
+          />
         )}
       </main>
 

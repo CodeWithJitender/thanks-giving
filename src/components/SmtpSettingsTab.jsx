@@ -41,7 +41,7 @@ export default function SmtpSettingsTab({ smtpConfig, onSaveSmtp, templates, not
     setTesting(true);
     try {
       await onSaveSmtp(form);
-      const res = await api.testSmtp();
+      const res = await api.testSmtp(form);
       notify(res.message, 'success');
     } catch (err) {
       notify(err.message, 'error');
@@ -71,10 +71,16 @@ export default function SmtpSettingsTab({ smtpConfig, onSaveSmtp, templates, not
     setLastPreviewUrl('');
     try {
       await onSaveSmtp(form);
-      const res = await api.sendTestEmail({
-        toEmail: testEmail,
-        toName: 'Deeksha',
-        templateId: testTemplateId,
+      const tpl = templates.find((t) => t.id === testTemplateId) || templates[0];
+      const res = await api.sendSingleEmail({
+        smtpConfig: form,
+        template: tpl,
+        client: {
+          name: 'Deeksha',
+          email: testEmail,
+          department: tpl?.department || 'General',
+        },
+        isTest: true,
       });
       if (res.previewUrl) setLastPreviewUrl(res.previewUrl);
       notify(res.message, 'success');
@@ -95,7 +101,7 @@ export default function SmtpSettingsTab({ smtpConfig, onSaveSmtp, templates, not
           <div>
             <h2 className="text-base font-semibold text-slate-900">SMTP Configuration Keys</h2>
             <p className="text-xs text-slate-500">
-              Enter your SMTP credentials once — they stay saved in the system.
+              Enter your SMTP credentials once — they stay saved in your browser & ready for Vercel/local sending.
             </p>
           </div>
           <button

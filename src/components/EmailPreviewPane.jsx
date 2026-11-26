@@ -1,38 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Monitor, Smartphone, Mail } from 'lucide-react';
-import { api } from '../api';
+import { buildPreviewEmail } from '../utils/emailBuilder';
 
 export default function EmailPreviewPane({ template, client, title = 'Live Email Preview' }) {
   const [viewMode, setViewMode] = useState('desktop');
-  const [rendered, setRendered] = useState({ subject: '', html: '', templateUsed: '' });
-  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!template) return;
-    let active = true;
-    const loadPreview = async () => {
-      setLoading(true);
-      try {
-        const res = await api.previewEmail({
-          template,
-          client: client || {
-            name: 'Deeksha',
-            email: 'deeksha@example.com',
-            department: template.department,
-          },
-        });
-        if (active) setRendered(res);
-      } catch {
-        // Ignore transient preview errors
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    loadPreview();
-    return () => {
-      active = false;
-    };
+  const rendered = useMemo(() => {
+    if (!template) return { subject: '', html: '' };
+    return buildPreviewEmail({
+      template,
+      client: client || {
+        name: 'Deeksha',
+        email: 'deeksha@example.com',
+        department: template.department,
+      },
+    });
   }, [template, client]);
 
   if (!template) {
@@ -49,7 +31,6 @@ export default function EmailPreviewPane({ template, client, title = 'Live Email
         <div className="flex items-center gap-2">
           <Mail className="h-4 w-4 text-amber-600" />
           <span className="text-sm font-semibold text-slate-800">{title}</span>
-          {loading && <span className="text-xs text-slate-400">Updating...</span>}
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
           <button
@@ -86,12 +67,7 @@ export default function EmailPreviewPane({ template, client, title = 'Live Email
         </div>
         <div className="mt-0.5 truncate">
           <span className="font-semibold text-slate-700">Subject:</span>{' '}
-          <span className="text-slate-900">
-            {rendered.subject ||
-              String(template.subject || '')
-                .replace(/\{\{\s*name\s*\}\}/gi, client?.name || 'Deeksha')
-                .replace(/\{\{\s*department\s*\}\}/gi, client?.department || template.department || '')}
-          </span>
+          <span className="text-slate-900">{rendered.subject}</span>
         </div>
       </div>
 

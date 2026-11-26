@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   FileSpreadsheet,
   Upload,
@@ -28,6 +28,10 @@ import EmailPreviewPane from './EmailPreviewPane';
 
 const PAGE_SIZE = 50;
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function SpreadsheetTab({
   templates,
   smtpConfig,
@@ -44,32 +48,14 @@ export default function SpreadsheetTab({
   const [previewData, setPreviewData] = useState(null);
   const [sending, setSending] = useState(false);
   const [templateOfTheDayId, setTemplateOfTheDayId] = useState('auto');
+  const cancelRef = useRef(false);
 
-  // Per-send / per-mail optional subject & description customization
   const [showCustomMail, setShowCustomMail] = useState(false);
   const [subjectOverride, setSubjectOverride] = useState('');
   const [bodyOverride, setBodyOverride] = useState('');
   const [rowOverrides, setRowOverrides] = useState({});
 
   const { fileName, headers, rawRows, mapping, rows, selectedIds } = sheetState;
-
-  // Poll active campaign while running
-  useEffect(() => {
-    if (!activeCampaign || activeCampaign.status !== 'running') return;
-    let active = true;
-    const timer = setInterval(async () => {
-      try {
-        const res = await api.getCampaign(activeCampaign.id);
-        if (active) setActiveCampaign(res.campaign);
-      } catch {
-        // Ignore transient poll error
-      }
-    }, 1000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [activeCampaign?.id, activeCampaign?.status, setActiveCampaign]);
 
   const templateMap = useMemo(() => {
     const map = new Map();
@@ -221,54 +207,132 @@ export default function SpreadsheetTab({
     [rows, selectedIds]
   );
 
-  const handleSend = async () => {
-    if (selectedRecipients.length === 0) return;
+  const runBatchSend = async (recipientsToSend, label) => {
+    cancelRef.current = false;
     setSending(true);
-    try {
-      const res = await api.startCampaign({
-        recipients: selectedRecipients.map((r) => ({
-          id: r.id,
-          name: r.name,
-          email: r.email,
-          department: r.department,
-          subjectOverride: rowOverrides[r.id]?.subject || '',
-          bodyOverride: rowOverrides[r.id]?.body || '',
-        })),
-        useDefaultFallback: true,
-        selectedTemplateId: templateOfTheDayId,
-        subjectOverride: subjectOverride.trim(),
-        bodyOverride: bodyOverride.trim(),
-        campaignName: `${fileName || 'Clients'} (${selectedRecipients.length})`,
-      });
-      setActiveCampaign(res.campaign);
-      notify(`Sending started for ${selectedRecipients.length} clients!`, 'success');
-    } catch (err) {
-      notify(err.message, 'error');
-    } finally {
-      setSending(false);
+
+    const job = {
+      id: `cmp_${Date.now()}`,
+      name: label,
+      mode: smtpConfig?.mode || 'simulation',
+      status: 'running',
+      total: recipientsToSend.length,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      results: recipientsToSend.map((r) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        department: r.department,
+        status: 'pending',
+        templateUsed: null,
+        error: null,
+        previewUrl: null,
+      })),
+    };
+    setActiveCampaign({ ...job, results: [...job.results] });
+
+    const delayMs = Number(smtpConfig?.delayMs) || 100;
+    const isSimulation = smtpConfig?.mode !== 'smtp';
+
+    for (let i = 0; i < recipientsToSend.length; i++) {
+      if (cancelRef.current) {
+        job.status = 'cancelled';
+        break;
+      }
+
+      const client = recipientsToSend[i];
+      const tpl = resolveTemplate(client.department);
+      if (!tpl) {
+        job.results[i] = {
+          ...job.results[i],
+          status: 'skipped',
+          error: 'No template found',
+        };
+        job.skipped++;
+        setActiveCampaign({ ...job, results: [...job.results] });
+        continue;
+      }
+
+      const rowOv = rowOverrides[client.id];
+      const effectiveTemplate = {
+        ...tpl,
+        subject: rowOv?.subject || subjectOverride.trim() || tpl.subject,
+        body: rowOv?.body || bodyOverride.trim() || tpl.body,
+      };
+
+      try {
+        if (isSimulation) {
+          await sleep(Math.min(delayMs, 30));
+          job.results[i] = {
+            ...job.results[i],
+            status: 'sent',
+            templateUsed: tpl.department,
+          };
+          job.sent++;
+        } else {
+          const res = await api.sendSingleEmail({
+            smtpConfig,
+            template: effectiveTemplate,
+            client: {
+              name: client.name,
+              email: client.email,
+              department: client.department,
+            },
+          });
+          job.results[i] = {
+            ...job.results[i],
+            status: 'sent',
+            templateUsed: tpl.department,
+            previewUrl: res.previewUrl || null,
+          };
+          job.sent++;
+          if (delayMs > 0 && i < recipientsToSend.length - 1) {
+            await sleep(delayMs);
+          }
+        }
+      } catch (err) {
+        job.results[i] = {
+          ...job.results[i],
+          status: 'failed',
+          templateUsed: tpl.department,
+          error: err.message || 'Send failed',
+        };
+        job.failed++;
+      }
+
+      setActiveCampaign({ ...job, results: [...job.results] });
     }
+
+    if (!cancelRef.current) {
+      job.status = 'completed';
+    }
+    setActiveCampaign({ ...job, results: [...job.results] });
+    setSending(false);
+    notify(`Finished: ${job.sent} sent, ${job.failed} failed`, job.failed > 0 ? 'info' : 'success');
   };
 
-  const handleCancel = async () => {
-    if (!activeCampaign) return;
-    try {
-      const res = await api.cancelCampaign(activeCampaign.id);
-      setActiveCampaign(res.campaign);
-      notify('Sending stopped', 'info');
-    } catch (err) {
-      notify(err.message, 'error');
-    }
+  const handleSend = () => {
+    if (selectedRecipients.length === 0) return;
+    runBatchSend(
+      selectedRecipients,
+      `${fileName || 'Clients'} (${selectedRecipients.length})`
+    );
   };
 
-  const handleRetry = async () => {
+  const handleCancel = () => {
+    cancelRef.current = true;
+    notify('Stopping after current email...', 'info');
+  };
+
+  const handleRetry = () => {
     if (!activeCampaign) return;
-    try {
-      const res = await api.retryCampaign(activeCampaign.id);
-      setActiveCampaign(res.campaign);
-      notify('Retrying failed emails...', 'info');
-    } catch (err) {
-      notify(err.message, 'error');
-    }
+    const failed = activeCampaign.results.filter(
+      (r) => r.status === 'failed' || r.status === 'skipped'
+    );
+    if (failed.length === 0) return;
+    runBatchSend(failed, `${activeCampaign.name} (Retry ${failed.length})`);
   };
 
   const processed =
@@ -398,7 +462,7 @@ export default function SpreadsheetTab({
               className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                 deptFilter === 'ALL'
                   ? 'bg-slate-900 text-white'
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
               All ({rows.length})
@@ -414,7 +478,7 @@ export default function SpreadsheetTab({
                   className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                     deptFilter === d.department
                       ? 'bg-amber-600 text-white'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   {d.department} ({d.count})
@@ -440,7 +504,7 @@ export default function SpreadsheetTab({
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Select Template of the Day</h3>
                 <p className="text-xs text-slate-500">
-                  Pick one template to send to everyone today, or auto-match each client's department.
+                  Pick one template to send to everyone today, or auto-match each client&apos;s department.
                 </p>
               </div>
               {selectedDayTemplate && (
@@ -462,7 +526,7 @@ export default function SpreadsheetTab({
               >
                 <div className="text-xs font-semibold text-slate-900">Auto-Match by Department</div>
                 <div className="mt-1 text-[11px] text-slate-600">
-                  Uses each client's Department column automatically.
+                  Uses each client&apos;s Department column automatically.
                 </div>
               </button>
 
@@ -515,7 +579,7 @@ export default function SpreadsheetTab({
               <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-200 pt-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Custom Subject (leave blank to use each department template)
+                    Custom Subject (leave blank to use template)
                   </label>
                   <input
                     type="text"
@@ -579,7 +643,7 @@ export default function SpreadsheetTab({
               >
                 <Send className="h-3.5 w-3.5" />
                 {sending
-                  ? 'Starting...'
+                  ? `Sending (${processed}/${activeCampaign?.total || selectedRecipients.length})...`
                   : `Send Emails to ${selectedRecipients.length} Clients (${
                       smtpConfig?.mode === 'smtp' ? 'Live SMTP' : 'Test Mode'
                     })`}
@@ -696,7 +760,7 @@ export default function SpreadsheetTab({
 
       {/* Live Campaign Progress & Delivery Results */}
       {activeCampaign && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-semibold text-slate-900">
@@ -748,10 +812,11 @@ export default function SpreadsheetTab({
 
           <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
+              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600">
                 <tr>
                   <th className="px-3 py-2">Client</th>
                   <th className="px-3 py-2">Department</th>
+                  <th className="px-3 py-2">Template</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Note</th>
                 </tr>
@@ -763,13 +828,14 @@ export default function SpreadsheetTab({
                       {r.name} <span className="text-slate-400">({r.email})</span>
                     </td>
                     <td className="px-3 py-2">{r.department}</td>
+                    <td className="px-3 py-2 text-slate-600">{r.templateUsed || '—'}</td>
                     <td className="px-3 py-2">
                       {r.status === 'sent' ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+                        <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
                           <CheckCircle2 className="h-3.5 w-3.5" /> Sent
                         </span>
                       ) : r.status === 'failed' ? (
-                        <span className="inline-flex items-center gap-1 text-red-700 font-medium">
+                        <span className="inline-flex items-center gap-1 font-medium text-red-700">
                           <XCircle className="h-3.5 w-3.5" /> Failed
                         </span>
                       ) : (
