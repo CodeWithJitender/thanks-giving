@@ -66,6 +66,21 @@ export const api = {
     request('/api/campaigns', { method: 'POST', body: JSON.stringify(campaign) }),
   clearCampaigns: () => request('/api/campaigns', { method: 'DELETE' }),
 
+  // MongoDB-backed Sent History (per-email tick + sent images)
+  getSentHistory: () => request('/api/sent-history'),
+  recordSentHistory: (entries) =>
+    request('/api/sent-history', {
+      method: 'POST',
+      body: JSON.stringify({ entries }),
+    }),
+  clearSentHistory: (email) =>
+    request(
+      email
+        ? `/api/sent-history?email=${encodeURIComponent(email)}`
+        : '/api/sent-history',
+      { method: 'DELETE' }
+    ),
+
   // Admin Document Console (/admin/jkr19)
   getAdminDocs: () => request('/api/admin-docs'),
   saveAdminDoc: (collection, document) =>

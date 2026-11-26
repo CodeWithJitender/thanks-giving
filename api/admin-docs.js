@@ -72,12 +72,19 @@ export default async function handler(req, res) {
       }
       const sheets = await sheetsCol.find({}).sort({ updatedAt: -1 }).toArray();
       const campaigns = await campaignsCol.find({}).sort({ updatedAt: -1 }).toArray();
+      const sentHistory = await db
+        .collection('sent_history')
+        .find({})
+        .sort({ sentAt: -1 })
+        .limit(2000)
+        .toArray();
       const assets = await listUploadedAssets(db);
 
       return res.status(200).json({
         templates: cleanDocs(templates),
         sheets: cleanDocs(sheets),
         campaigns: cleanDocs(campaigns),
+        sentHistory: cleanDocs(sentHistory),
         assets,
         exportedAt: new Date().toISOString(),
       });

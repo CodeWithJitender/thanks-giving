@@ -24,6 +24,7 @@ export default async function handler(req, res) {
         key: 'current',
         fileName: payload.fileName || '',
         headers: Array.isArray(payload.headers) ? payload.headers : [],
+        rawRows: Array.isArray(payload.rawRows) ? payload.rawRows.slice(0, 5000) : [],
         mapping: payload.mapping || { nameCol: '', emailCol: '', deptCol: '' },
         rows: Array.isArray(payload.rows) ? payload.rows : [],
         selectedIds: Array.isArray(payload.selectedIds) ? payload.selectedIds : [],

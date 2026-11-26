@@ -1,9 +1,21 @@
-import { formatClientName } from './spreadsheet';
+const LEGACY_KEYS = [
+  'tg_templates_v3',
+  'tg_sheet_v1',
+  'tg_campaigns_v1',
+  'tg_sent_history_v1',
+  'tg_ui_v1',
+];
 
-const TEMPLATES_KEY = 'tg_templates_v3';
-const SHEET_KEY = 'tg_sheet_v1';
-const CAMPAIGNS_KEY = 'tg_campaigns_v1';
-const UI_KEY = 'tg_ui_v1';
+export function clearLegacyBrowserStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  for (const key of LEGACY_KEYS) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Ignore storage access errors
+    }
+  }
+}
 
 const REAL_POSTER = '/uploads/happy-thanks-giving-1795678091178.jpg';
 
@@ -128,151 +140,3 @@ export const EMPTY_SHEET_STATE = {
   rows: [],
   selectedIds: new Set(),
 };
-
-function stripLocalhostOrigin(url = '') {
-  return String(url || '').replace(/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/uploads\/)/i, '$1');
-}
-
-export function loadStoredTemplates() {
-  try {
-    const raw = localStorage.getItem(TEMPLATES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        // Keep user's exact uploaded files untouched, just make localhost /uploads/... paths relative so they also work on Vercel
-        return parsed.map((t) => ({
-          ...t,
-          logoUrl: stripLocalhostOrigin(t.logoUrl),
-          posterUrl: stripLocalhostOrigin(t.posterUrl),
-        }));
-      }
-    }
-  } catch {
-    // Ignore storage errors
-  }
-  saveStoredTemplates(DEFAULT_TEMPLATES);
-  return DEFAULT_TEMPLATES;
-}
-
-export function saveStoredTemplates(templates) {
-  try {
-    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
-  } catch {
-    // Ignore quota errors
-  }
-  return templates;
-}
-
-export function loadStoredSheetState() {
-  try {
-    const raw = localStorage.getItem(SHEET_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.rows)) {
-        return {
-          ...EMPTY_SHEET_STATE,
-          ...parsed,
-          rows: parsed.rows.map((r) => ({ ...r, name: formatClientName(r.name) })),
-          selectedIds: new Set(Array.isArray(parsed.selectedIds) ? parsed.selectedIds : []),
-        };
-      }
-    }
-  } catch {
-    // Ignore storage errors
-  }
-  return EMPTY_SHEET_STATE;
-}
-
-export function saveStoredSheetState(sheetState) {
-  const serializable = {
-    fileName: sheetState.fileName || '',
-    headers: sheetState.headers || [],
-    rawRows: sheetState.rawRows || [],
-    mapping: sheetState.mapping || { nameCol: '', emailCol: '', deptCol: '' },
-    rows: (sheetState.rows || []).map(({ raw: _raw, ...rest }) => rest),
-    selectedIds: Array.from(sheetState.selectedIds || []),
-  };
-  try {
-    localStorage.setItem(SHEET_KEY, JSON.stringify(serializable));
-  } catch {
-    try {
-      localStorage.setItem(
-        SHEET_KEY,
-        JSON.stringify({ ...serializable, rawRows: [] })
-      );
-    } catch {
-      // Ignore quota errors
-    }
-  }
-}
-
-export function clearStoredSheetState() {
-  try {
-    localStorage.removeItem(SHEET_KEY);
-  } catch {
-    // Ignore
-  }
-  return EMPTY_SHEET_STATE;
-}
-
-export function loadStoredCampaign() {
-  try {
-    const raw = localStorage.getItem(CAMPAIGNS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
-    }
-  } catch {
-    // Ignore storage errors
-  }
-  return null;
-}
-
-export function saveStoredCampaign(campaign) {
-  if (!campaign) {
-    try {
-      localStorage.removeItem(CAMPAIGNS_KEY);
-    } catch {
-      // Ignore
-    }
-    return;
-  }
-  try {
-    const compact = {
-      ...campaign,
-      effectiveTemplate: campaign.effectiveTemplate
-        ? {
-            ...campaign.effectiveTemplate,
-            logoUrl: campaign.effectiveTemplate.logoUrl?.startsWith('data:')
-              ? ''
-              : campaign.effectiveTemplate.logoUrl,
-            posterUrl: campaign.effectiveTemplate.posterUrl?.startsWith('data:')
-              ? ''
-              : campaign.effectiveTemplate.posterUrl,
-          }
-        : null,
-    };
-    localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(compact));
-  } catch {
-    // Ignore quota errors
-  }
-}
-
-export function loadStoredUiPrefs() {
-  try {
-    const raw = localStorage.getItem(UI_KEY);
-    if (raw) return JSON.parse(raw) || {};
-  } catch {
-    // Ignore
-  }
-  return {};
-}
-
-export function saveStoredUiPrefs(patch) {
-  try {
-    const current = loadStoredUiPrefs();
-    localStorage.setItem(UI_KEY, JSON.stringify({ ...current, ...patch }));
-  } catch {
-    // Ignore
-  }
-}

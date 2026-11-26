@@ -33,6 +33,7 @@ import sheetHandler from '../api/sheet.js';
 import campaignsHandler from '../api/campaigns.js';
 import adminDocsHandler from '../api/admin-docs.js';
 import assetHandler from '../api/asset.js';
+import sentHistoryHandler from '../api/sent-history.js';
 import { getDb, isMongoConfigured } from '../api/_db.js';
 
 dotenv.config();
@@ -72,6 +73,7 @@ app.use('/api/campaigns', (req, res, next) => {
   return next();
 });
 app.all('/api/admin-docs', adminDocsHandler);
+app.all('/api/sent-history', sentHistoryHandler);
 
 // ---------------- Image Upload (saves file & returns persistent URL) ----------------
 app.post('/api/upload', async (req, res) => {

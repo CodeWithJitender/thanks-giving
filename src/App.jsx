@@ -12,14 +12,7 @@ import { api } from './api';
 import {
   DEFAULT_TEMPLATES,
   EMPTY_SHEET_STATE,
-  loadStoredCampaign,
-  loadStoredSheetState,
-  loadStoredTemplates,
-  loadStoredUiPrefs,
-  saveStoredCampaign,
-  saveStoredSheetState,
-  saveStoredTemplates,
-  saveStoredUiPrefs,
+  clearLegacyBrowserStorage,
 } from './utils/defaultTemplates';
 import { formatClientName } from './utils/spreadsheet';
 import TemplatesTab from './components/TemplatesTab';
@@ -44,14 +37,15 @@ export default function App() {
 }
 
 function MainApp() {
-  const [uiPrefs] = useState(() => loadStoredUiPrefs());
-  const [activeTab, setActiveTab] = useState(() => uiPrefs.activeTab || 'templates');
-  const [templates, setTemplates] = useState(() => loadStoredTemplates());
+  const [activeTab, setActiveTab] = useState('templates');
+  const [templates, setTemplates] = useState(DEFAULT_TEMPLATES);
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    () => uiPrefs.selectedTemplateId || loadStoredTemplates()[0]?.id || null
+    () => DEFAULT_TEMPLATES[0]?.id || null
   );
-  const [activeCampaign, setActiveCampaignState] = useState(() => loadStoredCampaign());
-  const [sheetState, setSheetStateRaw] = useState(() => loadStoredSheetState());
+  const [activeCampaign, setActiveCampaignState] = useState(null);
+  const [sentHistory, setSentHistory] = useState([]);
+  const [sheetState, setSheetStateRaw] = useState(EMPTY_SHEET_STATE);
+  const [loadingServer, setLoadingServer] = useState(true);
   const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'connected' | 'offline'
   const [toast, setToast] = useState(null);
 
@@ -68,21 +62,22 @@ function MainApp() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Initial load from MongoDB Atlas
+  // Load all data directly from the server (MongoDB Atlas) — do not persist app data in localStorage
   useEffect(() => {
+    clearLegacyBrowserStorage();
     let active = true;
-    const syncFromMongo = async () => {
+    const syncFromServer = async () => {
       try {
-        const [tplRes, sheetRes, cmpRes] = await Promise.all([
+        const [tplRes, sheetRes, cmpRes, histRes] = await Promise.all([
           api.getTemplates(),
           api.getSheet(),
           api.getCampaigns(),
+          api.getSentHistory(),
         ]);
         if (!active) return;
 
         if (Array.isArray(tplRes.templates) && tplRes.templates.length > 0) {
           setTemplates(tplRes.templates);
-          saveStoredTemplates(tplRes.templates);
           setSelectedTemplateId((prev) =>
             tplRes.templates.some((t) => t.id === prev) ? prev : tplRes.templates[0].id
           );
@@ -92,34 +87,61 @@ function MainApp() {
           const restored = {
             ...EMPTY_SHEET_STATE,
             ...sheetRes.sheet,
+            rawRows: Array.isArray(sheetRes.sheet.rawRows) ? sheetRes.sheet.rawRows : [],
             rows: sheetRes.sheet.rows.map((r) => ({ ...r, name: formatClientName(r.name) })),
             selectedIds: new Set(sheetRes.sheet.selectedIds || []),
           };
           setSheetStateRaw(restored);
-          saveStoredSheetState(restored);
         }
 
         if (Array.isArray(cmpRes.campaigns) && cmpRes.campaigns.length > 0) {
           setActiveCampaignState(cmpRes.campaigns[0]);
-          saveStoredCampaign(cmpRes.campaigns[0]);
+        }
+
+        if (Array.isArray(histRes.history)) {
+          setSentHistory(histRes.history);
         }
 
         setDbStatus('connected');
-      } catch {
-        if (active) setDbStatus('offline');
+      } catch (err) {
+        if (active) {
+          setDbStatus('offline');
+          notify(err?.message || 'Unable to reach server database', 'error');
+        }
+      } finally {
+        if (active) setLoadingServer(false);
       }
     };
 
-    syncFromMongo();
+    syncFromServer();
     return () => {
       active = false;
     };
+  }, [notify]);
+
+  const serializeSheet = (next) => ({
+    fileName: next.fileName || '',
+    headers: next.headers || [],
+    rawRows: Array.isArray(next.rawRows) ? next.rawRows.slice(0, 5000) : [],
+    mapping: next.mapping || { nameCol: '', emailCol: '', deptCol: '' },
+    rows: (next.rows || []).map(({ raw: _raw, ...rest }) => rest),
+    selectedIds: Array.from(next.selectedIds || []),
+  });
+
+  const saveSheetImmediately = useCallback(async (nextSheet) => {
+    if (sheetSyncTimer.current) clearTimeout(sheetSyncTimer.current);
+    setSheetStateRaw(nextSheet);
+    if (!nextSheet.fileName && (!nextSheet.rows || nextSheet.rows.length === 0)) {
+      await api.clearSheet();
+    } else {
+      await api.saveSheet(serializeSheet(nextSheet));
+    }
+    setDbStatus('connected');
   }, []);
 
   const setSheetState = useCallback((nextOrUpdater) => {
     setSheetStateRaw((prev) => {
       const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
-      saveStoredSheetState(next);
 
       if (sheetSyncTimer.current) clearTimeout(sheetSyncTimer.current);
       if (!next.fileName && (!next.rows || next.rows.length === 0)) {
@@ -127,15 +149,9 @@ function MainApp() {
       } else {
         sheetSyncTimer.current = setTimeout(() => {
           api
-            .saveSheet({
-              fileName: next.fileName || '',
-              headers: next.headers || [],
-              mapping: next.mapping || { nameCol: '', emailCol: '', deptCol: '' },
-              rows: (next.rows || []).map(({ raw: _raw, ...rest }) => rest),
-              selectedIds: Array.from(next.selectedIds || []),
-            })
+            .saveSheet(serializeSheet(next))
             .then(() => setDbStatus('connected'))
-            .catch(() => {});
+            .catch(() => setDbStatus('offline'));
         }, 300);
       }
 
@@ -146,13 +162,11 @@ function MainApp() {
   const setActiveCampaign = useCallback((nextOrUpdater) => {
     setActiveCampaignState((prev) => {
       const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
-      saveStoredCampaign(next);
 
       if (campaignSyncTimer.current) clearTimeout(campaignSyncTimer.current);
       if (!next) {
         api.clearCampaigns().catch(() => {});
       } else {
-        // Persist immediately on finish, or debounce slightly while streaming progress
         const delay = next.status === 'running' ? 1200 : 50;
         campaignSyncTimer.current = setTimeout(() => {
           const compact = {
@@ -172,7 +186,7 @@ function MainApp() {
           api
             .saveCampaign(compact)
             .then(() => setDbStatus('connected'))
-            .catch(() => {});
+            .catch(() => setDbStatus('offline'));
         }, delay);
       }
 
@@ -180,117 +194,65 @@ function MainApp() {
     });
   }, []);
 
+  const handleRecordSentHistory = useCallback((entries = []) => {
+    if (!entries.length) return;
+    setSentHistory((prev) => [...entries, ...prev].slice(0, 2000));
+    api
+      .recordSentHistory(entries)
+      .then((res) => {
+        if (Array.isArray(res.history)) {
+          setSentHistory(res.history);
+        }
+        setDbStatus('connected');
+      })
+      .catch(() => setDbStatus('offline'));
+  }, []);
+
+  const handleClearSentHistory = useCallback(() => {
+    setSentHistory([]);
+    api.clearSentHistory().catch(() => {});
+  }, []);
+
   const handleTabChange = (tabId) => {
     setActiveTab(tabId);
-    saveStoredUiPrefs({ activeTab: tabId });
   };
 
   const handleSelectTemplateId = (id) => {
     setSelectedTemplateId(id);
-    saveStoredUiPrefs({ selectedTemplateId: id });
   };
 
   const handleCreateTemplate = async (payload) => {
-    try {
-      const res = await api.createTemplate(payload);
-      saveStoredTemplates(res.templates);
-      setTemplates(res.templates);
-      setDbStatus('connected');
-      return res.template;
-    } catch {
-      const dept = (payload.department || 'New Brand').trim();
-      const base = templates[0] || DEFAULT_TEMPLATES[0];
-      const newTemplate = {
-        id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        department: dept,
-        brandColor: payload.brandColor || '#d97706',
-        isDefault: Boolean(payload.isDefault),
-        fromName: payload.fromName || dept,
-        fromEmail: payload.fromEmail || '',
-        subject: payload.subject || `Happy Thanksgiving, {{name}} — From ${dept}!`,
-        greeting: payload.greeting || 'Dear {{name}},',
-        body:
-          payload.body ||
-          `As Thanksgiving approaches, we want to take a moment to express our sincere gratitude for the trust you place in ${dept}.\n\nWe wish you and your loved ones a happy Thanksgiving filled with warmth, joy, and time spent with family and friends.`,
-        logoUrl: payload.logoUrl || base.logoUrl,
-        logoWidth: Number(payload.logoWidth) || 220,
-        logoBgColor: payload.logoBgColor || '#ffffff',
-        posterUrl: payload.posterUrl || base.posterUrl,
-        updatedAt: new Date().toISOString(),
-      };
-
-      let next = [...templates];
-      if (newTemplate.isDefault) {
-        next = next.map((t) => ({ ...t, isDefault: false }));
-      }
-      next.push(newTemplate);
-      saveStoredTemplates(next);
-      setTemplates(next);
-      return newTemplate;
-    }
+    const res = await api.createTemplate(payload);
+    setTemplates(res.templates);
+    setDbStatus('connected');
+    return res.template;
   };
 
   const handleUpdateTemplate = async (id, payload) => {
-    try {
-      const res = await api.updateTemplate(id, payload);
-      saveStoredTemplates(res.templates);
-      setTemplates(res.templates);
-      setDbStatus('connected');
-      return res.template;
-    } catch {
-      let next = [...templates];
-      if (payload.isDefault) {
-        next = next.map((t) => ({ ...t, isDefault: false }));
-      }
-      next = next.map((t) =>
-        t.id === id ? { ...t, ...payload, id, updatedAt: new Date().toISOString() } : t
-      );
-      saveStoredTemplates(next);
-      setTemplates(next);
-      return next.find((t) => t.id === id);
-    }
+    const res = await api.updateTemplate(id, payload);
+    setTemplates(res.templates);
+    setDbStatus('connected');
+    return res.template;
   };
 
   const handleDeleteTemplate = async (id) => {
     if (templates.length <= 1) {
       throw new Error('Cannot delete the last remaining template');
     }
-    try {
-      const res = await api.deleteTemplate(id);
-      saveStoredTemplates(res.templates);
-      setTemplates(res.templates);
-      setDbStatus('connected');
-      if (selectedTemplateId === id && res.templates.length > 0) {
-        handleSelectTemplateId(res.templates[0].id);
-      }
-    } catch (err) {
-      if (err.message?.includes('last remaining')) throw err;
-      let next = templates.filter((t) => t.id !== id);
-      if (!next.some((t) => t.isDefault) && next.length > 0) {
-        next[0] = { ...next[0], isDefault: true };
-      }
-      saveStoredTemplates(next);
-      setTemplates(next);
-      if (selectedTemplateId === id && next.length > 0) {
-        handleSelectTemplateId(next[0].id);
-      }
+    const res = await api.deleteTemplate(id);
+    setTemplates(res.templates);
+    setDbStatus('connected');
+    if (selectedTemplateId === id && res.templates.length > 0) {
+      handleSelectTemplateId(res.templates[0].id);
     }
   };
 
   const handleResetDefaults = async () => {
-    try {
-      const res = await api.resetTemplates();
-      saveStoredTemplates(res.templates);
-      setTemplates(res.templates);
-      handleSelectTemplateId(res.templates[0].id);
-      setDbStatus('connected');
-      notify(`Restored all ${res.templates.length} organization brand templates in MongoDB`, 'success');
-    } catch {
-      saveStoredTemplates(DEFAULT_TEMPLATES);
-      setTemplates(DEFAULT_TEMPLATES);
-      handleSelectTemplateId(DEFAULT_TEMPLATES[0].id);
-      notify(`Restored all ${DEFAULT_TEMPLATES.length} organization brand templates`, 'success');
-    }
+    const res = await api.resetTemplates();
+    setTemplates(res.templates);
+    handleSelectTemplateId(res.templates[0].id);
+    setDbStatus('connected');
+    notify(`Restored all ${res.templates.length} organization brand templates on server`, 'success');
   };
 
   return (
@@ -318,10 +280,10 @@ function MainApp() {
                 >
                   <Database className="h-2.5 w-2.5" />
                   {dbStatus === 'connected'
-                    ? 'MongoDB Synced'
+                    ? 'Saved on Server'
                     : dbStatus === 'connecting'
-                      ? 'Connecting DB...'
-                      : 'Local Cache'}
+                      ? 'Connecting Server...'
+                      : 'Server Offline'}
                 </span>
               </div>
             </div>
@@ -362,28 +324,40 @@ function MainApp() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-        {activeTab === 'templates' && (
-          <TemplatesTab
-            templates={templates}
-            selectedId={selectedTemplateId}
-            onSelectId={handleSelectTemplateId}
-            onCreate={handleCreateTemplate}
-            onUpdate={handleUpdateTemplate}
-            onDelete={handleDeleteTemplate}
-            onResetDefaults={handleResetDefaults}
-            notify={notify}
-          />
-        )}
+        {loadingServer ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-500 shadow-sm">
+            Loading templates and uploaded data from server...
+          </div>
+        ) : (
+          <>
+            {activeTab === 'templates' && (
+              <TemplatesTab
+                templates={templates}
+                selectedId={selectedTemplateId}
+                onSelectId={handleSelectTemplateId}
+                onCreate={handleCreateTemplate}
+                onUpdate={handleUpdateTemplate}
+                onDelete={handleDeleteTemplate}
+                onResetDefaults={handleResetDefaults}
+                notify={notify}
+              />
+            )}
 
-        {activeTab === 'spreadsheet' && (
-          <SpreadsheetTab
-            templates={templates}
-            sheetState={sheetState}
-            setSheetState={setSheetState}
-            activeCampaign={activeCampaign}
-            setActiveCampaign={setActiveCampaign}
-            notify={notify}
-          />
+            {activeTab === 'spreadsheet' && (
+              <SpreadsheetTab
+                templates={templates}
+                sheetState={sheetState}
+                setSheetState={setSheetState}
+                onSaveSheetNow={saveSheetImmediately}
+                activeCampaign={activeCampaign}
+                setActiveCampaign={setActiveCampaign}
+                sentHistory={sentHistory}
+                onRecordSentHistory={handleRecordSentHistory}
+                onClearSentHistory={handleClearSentHistory}
+                notify={notify}
+              />
+            )}
+          </>
         )}
       </main>
 

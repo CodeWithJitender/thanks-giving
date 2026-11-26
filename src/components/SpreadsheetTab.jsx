@@ -14,18 +14,13 @@ import {
   Filter,
   Users,
   CheckSquare,
+  History,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../api';
+import { interpolate } from '../utils/emailBuilder';
 import {
-  clearStoredSheetState,
-  loadStoredUiPrefs,
-  saveStoredUiPrefs,
-} from '../utils/defaultTemplates';
-import {
-  detectColumns,
-  downloadSampleCsv,
   exportCampaignCsv,
-  getSampleSpreadsheetRows,
   normalizeRows,
   parseSpreadsheetFile,
 } from '../utils/spreadsheet';
@@ -41,18 +36,20 @@ export default function SpreadsheetTab({
   templates,
   sheetState,
   setSheetState,
+  onSaveSheetNow,
   activeCampaign,
   setActiveCampaign,
+  sentHistory = [],
+  onRecordSentHistory,
+  onClearSentHistory,
   notify,
 }) {
   const [search, setSearch] = useState('');
-  const [deptFilter, setDeptFilterState] = useState(() => loadStoredUiPrefs().deptFilter || 'ALL');
-  const setDeptFilter = (val) => {
-    setDeptFilterState(val);
-    saveStoredUiPrefs({ deptFilter: val });
-  };
+  const [deptFilter, setDeptFilter] = useState('ALL');
+  const [sentStatusFilter, setSentStatusFilter] = useState('ALL');
   const [page, setPage] = useState(1);
   const [sending, setSending] = useState(false);
+  const [uploadingSheet, setUploadingSheet] = useState(false);
   const cancelRef = useRef(false);
 
   // Send & Preview Modal state
@@ -67,43 +64,35 @@ export default function SpreadsheetTab({
 
   const { fileName, headers, rawRows, mapping, rows, selectedIds } = sheetState;
 
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = async (e) => {
+    const file = e.target?.files?.[0];
+    if (e.target) e.target.value = '';
     if (!file) return;
+    setUploadingSheet(true);
     try {
       const parsed = await parseSpreadsheetFile(file);
       const normalized = normalizeRows(parsed.rawRows, parsed.mapping);
-      setSheetState({
+      const nextSheet = {
         fileName: parsed.fileName,
         headers: parsed.headers,
         rawRows: parsed.rawRows,
         mapping: parsed.mapping,
         rows: normalized,
         selectedIds: new Set(),
-      });
+      };
+      if (onSaveSheetNow) {
+        await onSaveSheetNow(nextSheet);
+      } else {
+        setSheetState(nextSheet);
+      }
       setPage(1);
       setDeptFilter('ALL');
-      notify(`Loaded ${normalized.length} rows from ${parsed.fileName}`, 'success');
+      notify(`Uploaded and saved ${normalized.length} rows from ${parsed.fileName} on server`, 'success');
     } catch (err) {
       notify(err.message, 'error');
+    } finally {
+      setUploadingSheet(false);
     }
-  };
-
-  const handleLoadSample = () => {
-    const sampleRaw = getSampleSpreadsheetRows();
-    const sampleHeaders = Object.keys(sampleRaw[0]);
-    const sampleMapping = detectColumns(sampleHeaders);
-    const normalized = normalizeRows(sampleRaw, sampleMapping);
-    setSheetState({
-      fileName: 'sample-thanksgiving-clients.csv',
-      headers: sampleHeaders,
-      rawRows: sampleRaw,
-      mapping: sampleMapping,
-      rows: normalized,
-      selectedIds: new Set(),
-    });
-    setPage(1);
-    setDeptFilter('ALL');
-    notify('Loaded sample spreadsheet. Filter by Department and select clients to send.', 'info');
   };
 
   const updateMapping = (key, value) => {
@@ -132,10 +121,28 @@ export default function SpreadsheetTab({
 
   const validTotalCount = useMemo(() => rows.filter((r) => r.validEmail).length, [rows]);
 
+  const sentByEmailMap = useMemo(() => {
+    const map = new Map();
+    for (const h of sentHistory) {
+      const key = String(h.email || h.displayEmail || '').trim().toLowerCase();
+      if (!key) continue;
+      if (!map.has(key)) {
+        map.set(key, { latest: h, count: 1 });
+      } else {
+        map.get(key).count += 1;
+      }
+    }
+    return map;
+  }, [sentHistory]);
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (deptFilter !== 'ALL' && (r.department || 'Unspecified') !== deptFilter) return false;
+      const emailKey = String(r.email || '').trim().toLowerCase();
+      const alreadySent = sentByEmailMap.has(emailKey);
+      if (sentStatusFilter === 'SENT' && !alreadySent) return false;
+      if (sentStatusFilter === 'UNSENT' && alreadySent) return false;
       if (q) {
         return (
           r.name.toLowerCase().includes(q) ||
@@ -145,7 +152,7 @@ export default function SpreadsheetTab({
       }
       return true;
     });
-  }, [rows, deptFilter, search]);
+  }, [rows, deptFilter, sentStatusFilter, search, sentByEmailMap]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pagedRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -270,6 +277,8 @@ export default function SpreadsheetTab({
     };
     setActiveCampaign({ ...job, results: [...job.results] });
 
+    const newlySentEntries = [];
+
     for (let i = 0; i < recipientsToSend.length; i++) {
       if (cancelRef.current) {
         job.status = 'cancelled';
@@ -297,6 +306,20 @@ export default function SpreadsheetTab({
           previewUrl: res.previewUrl || null,
         };
         job.sent++;
+
+        newlySentEntries.push({
+          id: `hist_${Date.now()}_${i}`,
+          email: String(client.email || '').trim().toLowerCase(),
+          displayEmail: String(client.email || '').trim(),
+          name: client.name || '',
+          department: client.department || '',
+          templateUsed: effectiveTemplate?.department || 'Template',
+          subject: interpolate(effectiveTemplate?.subject || '', client, effectiveTemplate),
+          logoUrl: effectiveTemplate?.logoUrl?.startsWith('data:') ? '' : effectiveTemplate?.logoUrl || '',
+          posterUrl: effectiveTemplate?.posterUrl?.startsWith('data:') ? '' : effectiveTemplate?.posterUrl || '',
+          sentAt: new Date().toISOString(),
+        });
+
         if (i < recipientsToSend.length - 1) {
           await sleep(40);
         }
@@ -310,6 +333,10 @@ export default function SpreadsheetTab({
       }
 
       setActiveCampaign({ ...job, results: [...job.results] });
+    }
+
+    if (newlySentEntries.length > 0 && onRecordSentHistory) {
+      onRecordSentHistory(newlySentEntries);
     }
 
     if (!cancelRef.current) {
@@ -370,44 +397,17 @@ export default function SpreadsheetTab({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={downloadSampleCsv}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Sample CSV
-            </button>
-            <button
-              type="button"
-              onClick={handleLoadSample}
-              className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
-            >
-              Load Sample Data
-            </button>
             <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-slate-800">
               <Upload className="h-3.5 w-3.5" />
-              {fileName ? 'Change File' : 'Upload Sheet'}
+              {uploadingSheet ? 'Saving on Server...' : 'Upload File'}
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
-                onChange={(e) => handleFileUpload(e.target.files?.[0])}
+                disabled={uploadingSheet}
+                onChange={handleFileUpload}
                 className="hidden"
               />
             </label>
-            {rows.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSheetState(clearStoredSheetState());
-                  setDeptFilter('ALL');
-                  notify('Cleared saved spreadsheet data', 'info');
-                }}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Clear Sheet
-              </button>
-            )}
           </div>
         </div>
 
@@ -470,12 +470,13 @@ export default function SpreadsheetTab({
             Click to upload your Excel or CSV spreadsheet
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            Supports Name, Email ID, and Department / Website Name columns &mdash; or click &ldquo;Load Sample Data&rdquo; above
+            Supports Name, Email ID, and Department / Website Name columns &mdash; saved directly on the server
           </div>
           <input
             type="file"
             accept=".xlsx,.xls,.csv"
-            onChange={(e) => handleFileUpload(e.target.files?.[0])}
+            disabled={uploadingSheet}
+            onChange={handleFileUpload}
             className="hidden"
           />
         </label>
@@ -548,6 +549,17 @@ export default function SpreadsheetTab({
                   </select>
                 </div>
 
+                <select
+                  aria-label="Filter by Sent Status"
+                  value={sentStatusFilter}
+                  onChange={(e) => { setSentStatusFilter(e.target.value); setPage(1); }}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="ALL">All Status</option>
+                  <option value="UNSENT">Not Sent Yet</option>
+                  <option value="SENT">Sent Already</option>
+                </select>
+
                 <button
                   type="button"
                   onClick={toggleSelectAllFiltered}
@@ -604,10 +616,13 @@ export default function SpreadsheetTab({
                         </select>
                       </div>
                     </th>
+                    <th className="px-4 py-3">Sent Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {pagedRows.map((row) => (
+                  {pagedRows.map((row) => {
+                    const sentRecord = sentByEmailMap.get(String(row.email || '').trim().toLowerCase());
+                    return (
                     <tr
                       key={row.id}
                       onClick={() => row.validEmail && toggleRow(row.id)}
@@ -646,8 +661,30 @@ export default function SpreadsheetTab({
                           {row.department || 'Unspecified'}
                         </span>
                       </td>
+                      <td className="px-4 py-3">
+                        {sentRecord ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              title={`Sent ${sentRecord.latest.templateUsed} on ${new Date(sentRecord.latest.sentAt).toLocaleString()}`}
+                              className="inline-flex w-fit items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
+                            >
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                              Sent Already{sentRecord.count > 1 ? ` (${sentRecord.count}x)` : ''}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {sentRecord.latest.templateUsed} &bull;{' '}
+                              {new Date(sentRecord.latest.sentAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] text-slate-400">
+                            Not Sent
+                          </span>
+                        )}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -786,6 +823,110 @@ export default function SpreadsheetTab({
                           View Email <ExternalLink className="h-3 w-3" />
                         </a>
                       )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Persistent Sent History with Sent Logo & Poster Thumbnails */}
+      {sentHistory.length > 0 && (
+        <div className="space-y-4 rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-emerald-600" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Sent Email &amp; Image History ({sentHistory.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Saved record of every email sent, including the exact logo and Thanksgiving poster image sent.
+                </p>
+              </div>
+            </div>
+            {onClearSentHistory && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Clear all saved sent history & "Sent Already" checkmarks?')) {
+                    onClearSentHistory();
+                  }
+                }}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear History
+              </button>
+            )}
+          </div>
+
+          <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase text-slate-600">
+                <tr>
+                  <th className="px-3 py-2.5">Client</th>
+                  <th className="px-3 py-2.5">Department / Template</th>
+                  <th className="px-3 py-2.5">Images Sent (Logo &amp; Poster)</th>
+                  <th className="px-3 py-2.5">Subject</th>
+                  <th className="px-3 py-2.5">Sent At</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sentHistory.slice(0, 200).map((h, idx) => (
+                  <tr key={h.id || `${h.email}-${idx}`} className="hover:bg-slate-50">
+                    <td className="px-3 py-2.5">
+                      <div className="font-semibold text-slate-900">{h.name || '—'}</div>
+                      <div className="text-[11px] text-slate-500">{h.displayEmail || h.email}</div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-medium text-slate-800">{h.templateUsed || '—'}</div>
+                      <div className="text-[11px] text-slate-400">Dept: {h.department || '—'}</div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        {h.logoUrl && (
+                          <a
+                            href={h.logoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Open sent logo"
+                            className="block rounded border border-slate-200 bg-white p-1 hover:border-amber-500"
+                          >
+                            <img
+                              src={h.logoUrl}
+                              alt="Sent logo"
+                              className="h-7 w-14 object-contain"
+                            />
+                          </a>
+                        )}
+                        {h.posterUrl && (
+                          <a
+                            href={h.posterUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Open sent poster"
+                            className="block rounded border border-slate-200 bg-white p-0.5 hover:border-amber-500"
+                          >
+                            <img
+                              src={h.posterUrl}
+                              alt="Sent poster"
+                              className="h-9 w-9 rounded object-cover"
+                            />
+                          </a>
+                        )}
+                        {!h.logoUrl && !h.posterUrl && (
+                          <span className="text-slate-400">Inline image</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="max-w-[220px] truncate px-3 py-2.5 text-slate-700" title={h.subject}>
+                      {h.subject || '—'}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-slate-500">
+                      {h.sentAt ? new Date(h.sentAt).toLocaleString() : '—'}
                     </td>
                   </tr>
                 ))}

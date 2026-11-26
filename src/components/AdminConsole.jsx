@@ -22,7 +22,10 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import {
+  detectColumns,
+  downloadSampleCsv,
   formatClientName,
+  getSampleSpreadsheetRows,
   isValidEmail,
   normalizeRows,
   parseSpreadsheetFile,
@@ -52,6 +55,7 @@ export default function AdminConsole() {
     sheets: [],
     campaigns: [],
     assets: [],
+    sentHistory: [],
   });
 
   // Active sheet document being edited
@@ -86,6 +90,7 @@ export default function AdminConsole() {
         sheets: res.sheets || [],
         campaigns: res.campaigns || [],
         assets: res.assets || [],
+        sentHistory: res.sentHistory || [],
       });
 
       const currentSheet = (res.sheets || []).find((s) => s.key === 'current') || res.sheets?.[0];
@@ -255,6 +260,61 @@ export default function AdminConsole() {
     notify(`Removed ${removed} duplicate row(s)`, 'info');
   };
 
+  const handleLoadSampleSheet = async () => {
+    setSaving(true);
+    try {
+      const sampleRaw = getSampleSpreadsheetRows();
+      const sampleHeaders = Object.keys(sampleRaw[0]);
+      const sampleMapping = detectColumns(sampleHeaders);
+      const normalized = normalizeRows(sampleRaw, sampleMapping).map(({ raw: _r, ...rest }) => rest);
+      await api.saveSheet({
+        fileName: 'sample-thanksgiving-clients.csv',
+        headers: sampleHeaders,
+        rawRows: sampleRaw,
+        mapping: sampleMapping,
+        rows: normalized,
+        selectedIds: [],
+      });
+      notify(`Loaded and saved ${normalized.length} sample rows on server`, 'success');
+      await loadAll();
+    } catch (err) {
+      notify(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearSheetOnServer = async () => {
+    if (!window.confirm('Clear the uploaded client sheet from the server?')) return;
+    setSaving(true);
+    try {
+      await api.clearSheet();
+      setSheetRows([]);
+      notify('Cleared saved client sheet from server', 'info');
+      await loadAll();
+    } catch (err) {
+      notify(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteSentHistoryItem = async (id) => {
+    try {
+      if (id) {
+        const res = await fetch(`/api/sent-history?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete history entry');
+      } else {
+        if (!window.confirm('Clear all sent history records from the server?')) return;
+        await api.clearSentHistory();
+      }
+      notify(id ? 'Deleted sent history record' : 'Cleared all sent history', 'info');
+      await loadAll();
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+  };
+
   const saveSheetToMongo = async () => {
     setSaving(true);
     try {
@@ -389,6 +449,7 @@ export default function AdminConsole() {
               { id: 'sheets', label: `Client Sheet Rows (${sheetRows.length})` },
               { id: 'templates', label: `Brand Templates (${data.templates.length})` },
               { id: 'campaigns', label: `Campaign Logs (${data.campaigns.length})` },
+              { id: 'sentHistory', label: `Sent History (${data.sentHistory.length})` },
               { id: 'assets', label: `Uploaded Images (${data.assets.length})` },
             ].map((t) => (
               <button
@@ -462,6 +523,31 @@ export default function AdminConsole() {
                       className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                     >
                       Deduplicate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadSampleCsv}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Sample CSV
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={handleLoadSampleSheet}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                    >
+                      Load Sample Data
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={handleClearSheetOnServer}
+                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Clear Sheet
                     </button>
                   </div>
 
@@ -768,7 +854,98 @@ export default function AdminConsole() {
               </div>
             )}
 
-            {/* 4. UPLOADED IMAGE ASSETS */}
+            {/* 4. SENT HISTORY */}
+            {section === 'sentHistory' && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-xs text-slate-600">
+                    All sent email records &amp; images saved in <code className="font-mono">thanksgiving.sent_history</code>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => downloadJson('sent-history.json', data.sentHistory)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Export JSON
+                    </button>
+                    {data.sentHistory.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSentHistoryItem(null)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Clear All History
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase text-slate-600">
+                      <tr>
+                        <th className="px-4 py-3">Client</th>
+                        <th className="px-4 py-3">Template / Dept</th>
+                        <th className="px-4 py-3">Images Sent</th>
+                        <th className="px-4 py-3">Sent At</th>
+                        <th className="px-4 py-3 text-right">Delete</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {data.sentHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                            No sent history recorded yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        data.sentHistory.map((h, idx) => (
+                          <tr key={h.id || `${h.email}-${idx}`} className="hover:bg-slate-50">
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-slate-900">{h.name || '—'}</div>
+                              <div className="text-[11px] text-slate-500">{h.displayEmail || h.email}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-slate-800">{h.templateUsed || '—'}</div>
+                              <div className="text-[11px] text-slate-400">Dept: {h.department || '—'}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                {h.logoUrl && (
+                                  <img src={h.logoUrl} alt="Logo" className="h-6 w-12 rounded border border-slate-200 object-contain p-0.5" />
+                                )}
+                                {h.posterUrl && (
+                                  <img src={h.posterUrl} alt="Poster" className="h-8 w-8 rounded border border-slate-200 object-cover" />
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-500">
+                              {h.sentAt ? new Date(h.sentAt).toLocaleString() : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {h.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSentHistoryItem(h.id)}
+                                  className="rounded border border-red-200 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50"
+                                >
+                                  Delete
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 5. UPLOADED IMAGE ASSETS */}
             {section === 'assets' && (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
